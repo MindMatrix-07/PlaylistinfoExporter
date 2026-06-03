@@ -489,17 +489,24 @@ async function exportToPDF() {
     doc.setFontSize(10); doc.setTextColor(130,130,180);
     doc.text(`${allTracks.length} tracks`, pageW/2, 92, {align:'center'});
 
-    // Draw Playlist Cover Image in the blank space
+    // Draw Playlist Cover Image — large and centered
     const coverUrl = playlistData.images?.[0]?.url;
     if (coverUrl) {
-      const coverJpg = await getImageUrlAsJpeg(coverUrl, 500, 500);
+      const coverJpg = await getImageUrlAsJpeg(coverUrl, 800, 800);
       if (coverJpg) {
-        const coverSize = 105; // 105mm x 105mm
-        doc.addImage(coverJpg, 'JPEG', pageW/2 - coverSize/2, 104, coverSize, coverSize);
-        // Draw subtle border around artwork
+        const coverSize = 160; // 160mm × 160mm — fills the available space
+        // Available vertical space: y=98 to y=265 (167mm). Center of that = 181.5mm
+        const coverY = 98;
+        const coverX = pageW / 2 - coverSize / 2;
+        doc.addImage(coverJpg, 'JPEG', coverX, coverY, coverSize, coverSize);
+        // Outer glow border (green, slightly larger)
+        doc.setDrawColor(29, 185, 84);
+        doc.setLineWidth(1.2);
+        doc.rect(coverX - 1, coverY - 1, coverSize + 2, coverSize + 2);
+        // Inner sharp border
         doc.setDrawColor(40, 40, 60);
-        doc.setLineWidth(0.5);
-        doc.rect(pageW/2 - coverSize/2, 104, coverSize, coverSize);
+        doc.setLineWidth(0.4);
+        doc.rect(coverX, coverY, coverSize, coverSize);
       }
     }
 
