@@ -132,6 +132,16 @@ body {
   color: var(--green);
 }
 
+.github-link svg {
+  color: var(--text-secondary);
+  transition: transform 0.2s, color 0.2s;
+}
+
+.github-link:hover svg {
+  color: #1DB954 !important;
+  transform: scale(1.12);
+}
+
 /* ===== Connected Status ===== */
 .connected-status {
   display: flex;

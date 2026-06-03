@@ -504,9 +504,11 @@ async function exportToPDF() {
     }
 
     doc.setFontSize(8.5); doc.setTextColor(29,185,84);
-    doc.text(playlistData?.external_urls?.spotify || '', pageW/2, pageH-22, {align:'center'});
-    doc.setTextColor(80,80,100);
-    doc.text('Generated with Spotify Playlist Exporter', pageW/2, pageH-16, {align:'center'});
+    doc.text(playlistData?.external_urls?.spotify || '', pageW/2, pageH-26, {align:'center'});
+    doc.setFont('helvetica','italic'); doc.setFontSize(7.5); doc.setTextColor(140,140,150);
+    doc.text('Note: AI language detection is search-based and may occasionally make mistakes.', pageW/2, pageH-20, {align:'center'});
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(80,80,100);
+    doc.text('Generated with Playlist Info Exporter', pageW/2, pageH-14, {align:'center'});
 
     // Tracks
     doc.addPage(); drawHeader(); y = 32;
@@ -639,8 +641,12 @@ async function exportToPDF() {
     });
 
     y += 6; checkPage(12);
-    doc.setFont('helvetica','italic'); doc.setFontSize(8); doc.setTextColor(180,180,200);
-    doc.text(`Total: ${allTracks.length} tracks · Exported ${new Date().toLocaleDateString()} · Includes ISRC`, mL, y);
+    doc.setFont('helvetica','italic'); doc.setFontSize(7.5); doc.setTextColor(160,160,180);
+    let footerNote = `Total: ${allTracks.length} tracks · Exported ${new Date().toLocaleDateString()} · Includes ISRC`;
+    if (isAiOn) {
+      footerNote += ` · Note: AI language detection may make mistakes.`;
+    }
+    doc.text(footerNote, mL, y);
 
     const safe = (playlistData?.name||'playlist').replace(/[^a-z0-9]/gi,'_').toLowerCase();
     
