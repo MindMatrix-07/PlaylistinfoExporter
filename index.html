@@ -78,6 +78,14 @@
         </div>
       </div>
 
+      <div class="ai-mode-container" id="aiModeContainer" style="display:none; margin-bottom:24px;">
+        <label class="ai-toggle-label">
+          <input type="checkbox" id="aiModeCheckbox" />
+          <span class="toggle-custom"></span>
+          <span class="ai-toggle-text">⚡ Google AI Mode (Ask Google Gemini for track languages in background)</span>
+        </label>
+      </div>
+
       <button class="btn-fetch" id="fetchBtn" onclick="fetchPlaylist()">
         <span class="btn-text">Fetch Playlist</span>
         <svg class="btn-icon" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -124,6 +132,6 @@
   </div>
 
   <div class="toast" id="toast"></div>
-  <script src="app.js?v=2.8"></script>
+  <script src="app.js?v=2.9"></script>
 </body>
 </html>

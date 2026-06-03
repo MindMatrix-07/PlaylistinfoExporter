@@ -4,6 +4,7 @@
 
 let allTracks = [];
 let playlistData = null;
+let aiScrapingInProgress = false;
 
 // Heuristic Language Detector
 function detectLanguage(title, isrc) {
@@ -311,6 +312,14 @@ async function fetchPlaylist() {
     setLoading(false);
     renderResults();
 
+    const aiModeCheckbox = document.getElementById('aiModeCheckbox');
+    if (aiModeCheckbox && aiModeCheckbox.checked) {
+      aiScrapingInProgress = false;
+      setTimeout(() => {
+        startGoogleAiLanguageScraping();
+      }, 100);
+    }
+
   } catch (err) {
     setLoading(false);
     showError(err.message || 'Something went wrong.', 'errorBox2');
@@ -609,6 +618,95 @@ async function exportToPDF() {
   }
 }
 
+// ─── Google AI Mode Helpers ───────────────────
+
+function checkExtensionPresence() {
+  const isExt = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
+  const container = document.getElementById('aiModeContainer');
+  if (container) {
+    container.style.display = isExt ? 'block' : 'none';
+  }
+}
+
+function initAiToggleListener() {
+  const cb = document.getElementById('aiModeCheckbox');
+  if (cb) {
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        if (allTracks && allTracks.length > 0) {
+          startGoogleAiLanguageScraping();
+        }
+      } else {
+        aiScrapingInProgress = false;
+      }
+    });
+  }
+}
+
+async function startGoogleAiLanguageScraping() {
+  if (aiScrapingInProgress) return;
+  aiScrapingInProgress = true;
+
+  const tracksToScan = allTracks.map((t, idx) => ({ track: t, idx }));
+  const body = document.getElementById('tracksBody');
+
+  for (const item of tracksToScan) {
+    if (!aiScrapingInProgress) break;
+
+    const track = item.track;
+    const idx = item.idx;
+    const row = body ? body.children[idx] : null;
+    const badge = row ? row.querySelector('.col-lang .lang-badge') : null;
+
+    if (badge) {
+      badge.classList.add('scanning-text');
+      badge.textContent = '⚡ Scanning...';
+    }
+
+    try {
+      const response = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { type: 'ASK_GOOGLE_AI_LANG', song: track.name, artists: track.artists },
+          (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (res && res.ok) {
+              resolve(res.language);
+            } else {
+              reject(new Error(res?.error || 'AI Mode failed.'));
+            }
+          }
+        );
+      });
+
+      track.language = response;
+
+      if (badge) {
+        badge.classList.remove('scanning-text');
+        badge.textContent = response;
+      }
+    } catch (err) {
+      console.warn(`[AI Mode] Failed for "${track.name}":`, err.message);
+      
+      const fallback = detectLanguage(track.name, track.isrc);
+      track.language = fallback;
+
+      if (badge) {
+        badge.classList.remove('scanning-text');
+        badge.textContent = fallback;
+      }
+
+      if (err.message && err.message.includes('CAPTCHA')) {
+        showToast('⚠️ Google CAPTCHA appeared. Please solve it.');
+        aiScrapingInProgress = false;
+        break;
+      }
+    }
+  }
+
+  aiScrapingInProgress = false;
+}
+
 // ─── Init ─────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -621,6 +719,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Update UI based on auth state
   updateAuthUI();
+
+  // Check extension presence and setup toggles
+  checkExtensionPresence();
+  initAiToggleListener();
 
   // Enter key on playlist URL
   document.addEventListener('keydown', e => {
