@@ -4,59 +4,73 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Spotify Playlist Exporter</title>
-  <meta name="description" content="Export any Spotify playlist to a beautiful PDF with song names, artists, and links." />
+  <meta name="description" content="Export any Spotify playlist to PDF with song names, artists, ISRC and links." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <link rel="stylesheet" href="style.css?v=1.2" />
+  <link rel="stylesheet" href="style.css?v=2.0" />
 </head>
 <body>
 
-  <!-- Background orbs -->
   <div class="bg-orb orb1"></div>
   <div class="bg-orb orb2"></div>
   <div class="bg-orb orb3"></div>
 
   <div class="app-wrapper">
 
-    <!-- Header -->
     <header class="header">
       <div class="logo">
-        <svg class="spotify-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <svg class="spotify-icon" viewBox="0 0 24 24" fill="none">
           <circle cx="12" cy="12" r="12" fill="#1DB954"/>
           <path d="M17.9 10.9C14.7 9 9.35 8.8 6.3 9.75c-.5.15-1-.15-1.15-.6-.15-.5.15-1 .6-1.15 3.55-1.05 9.4-.85 13.1 1.35.45.25.6.85.35 1.3-.25.35-.85.5-1.3.25zm-.1 2.8c-.25.35-.7.5-1.05.25-2.7-1.65-6.8-2.15-9.95-1.15-.4.1-.8-.1-.9-.5-.1-.4.1-.8.5-.9 3.65-1.1 8.15-.55 11.25 1.35.3.15.45.65.15 1zm-1.2 2.75c-.2.3-.55.4-.85.2-2.35-1.45-5.3-1.75-8.8-.95-.35.1-.65-.15-.75-.45-.1-.35.15-.65.45-.75 3.8-.85 7.1-.5 9.7 1.1.35.15.4.55.25.85z" fill="white"/>
         </svg>
         <span class="logo-text">Playlist <span class="accent">Exporter</span></span>
       </div>
-      <div class="header-badge">PDF Export</div>
+      <div id="connectedStatus" class="connected-status" style="display:none;">
+        <span class="connected-dot"></span>
+        <span id="connectedName">Connected</span>
+        <button class="btn-disconnect" onclick="disconnectSpotify()">Disconnect</button>
+      </div>
+      <div id="notConnectedBadge" class="header-badge">PDF Export</div>
     </header>
 
-    <!-- Setup Card -->
-    <section class="setup-card glass-card" id="setupCard">
+    <!-- AUTH CARD (shown when not logged in) -->
+    <section class="setup-card glass-card" id="authCard">
       <div class="setup-title">
         <h1>Export Your Spotify Playlist</h1>
-        <p>Enter your Spotify API credentials and a playlist link to extract all tracks.</p>
+        <p>Connect your Spotify account to fetch any public playlist and export it as a beautiful PDF with ISRC codes.</p>
       </div>
 
-      <div class="credentials-grid">
-        <div class="input-group">
-          <label for="clientId">Client ID</label>
-          <div class="input-wrapper">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C9.24 2 7 4.24 7 7s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 12c-5.33 0-8 2.67-8 4v2h16v-2c0-1.33-2.67-4-8-4z" fill="currentColor"/></svg>
-            <input type="text" id="clientId" placeholder="Spotify Client ID" autocomplete="off" />
-          </div>
-        </div>
-        <div class="input-group">
-          <label for="clientSecret">Client Secret</label>
-          <div class="input-wrapper">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z" fill="currentColor"/></svg>
-            <input type="password" id="clientSecret" placeholder="Spotify Client Secret" autocomplete="off" />
-          </div>
+      <div class="input-group full-width" style="margin-bottom:16px;">
+        <label for="clientId">Client ID</label>
+        <div class="input-wrapper">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C9.24 2 7 4.24 7 7s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 12c-5.33 0-8 2.67-8 4v2h16v-2c0-1.33-2.67-4-8-4z" fill="currentColor"/></svg>
+          <input type="text" id="clientId" placeholder="Spotify Client ID" autocomplete="off" />
         </div>
       </div>
 
-      <div class="input-group full-width">
+      <div class="help-box">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/></svg>
+        <span>Get your Client ID at <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com/dashboard</a>. Set Redirect URI to <strong id="redirectUriDisplay"></strong> in your app settings.</span>
+      </div>
+
+      <button class="btn-fetch" id="connectBtn" onclick="connectSpotify()">
+        <span class="btn-text">Connect with Spotify</span>
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+
+      <div class="error-box" id="errorBox" style="display:none;"></div>
+    </section>
+
+    <!-- PLAYLIST CARD (shown when logged in) -->
+    <section class="setup-card glass-card" id="playlistCard" style="display:none;">
+      <div class="setup-title">
+        <h1>Fetch a Playlist</h1>
+        <p>Paste any public Spotify playlist URL or URI below.</p>
+      </div>
+
+      <div class="input-group full-width" style="margin-bottom:24px;">
         <label for="playlistUrl">Playlist URL or URI</label>
         <div class="input-wrapper">
           <svg viewBox="0 0 24 24" fill="none"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z" fill="currentColor"/></svg>
@@ -64,34 +78,27 @@
         </div>
       </div>
 
-      <div class="help-box">
-        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/></svg>
-        <span>Get your credentials at <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com/dashboard</a> → Create App → copy Client ID & Secret</span>
-      </div>
-
       <button class="btn-fetch" id="fetchBtn" onclick="fetchPlaylist()">
         <span class="btn-text">Fetch Playlist</span>
         <svg class="btn-icon" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
 
-      <div class="error-box" id="errorBox" style="display:none;"></div>
+      <div class="error-box" id="errorBox2" style="display:none;"></div>
     </section>
 
-    <!-- Loading State -->
+    <!-- Loading -->
     <div class="loading-state" id="loadingState" style="display:none;">
       <div class="spinner-ring"></div>
       <p id="loadingText">Fetching playlist…</p>
     </div>
 
-    <!-- Results Section -->
+    <!-- Results -->
     <section class="results-section" id="resultsSection" style="display:none;">
-
       <div class="playlist-meta glass-card" id="playlistMeta"></div>
-
       <div class="results-toolbar">
         <div class="track-count" id="trackCountLabel"></div>
         <div class="toolbar-actions">
-          <button class="btn-secondary" id="copyBtn" onclick="copyToClipboard()">
+          <button class="btn-secondary" onclick="copyToClipboard()">
             <svg viewBox="0 0 24 24" fill="none"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="currentColor"/></svg>
             Copy All
           </button>
@@ -101,7 +108,6 @@
           </button>
         </div>
       </div>
-
       <div class="tracks-table glass-card">
         <div class="table-header">
           <span class="col-num">#</span>
@@ -112,14 +118,11 @@
         </div>
         <div class="table-body" id="tracksBody"></div>
       </div>
-
     </section>
 
   </div>
 
-  <!-- Toast -->
   <div class="toast" id="toast"></div>
-
-  <script src="app.js?v=1.5"></script>
+  <script src="app.js?v=2.0"></script>
 </body>
 </html>
