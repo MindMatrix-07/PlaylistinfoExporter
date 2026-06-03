@@ -427,14 +427,14 @@ async function exportToPDF() {
     // Draw Playlist Cover Image in the blank space
     const coverUrl = playlistData.images?.[0]?.url;
     if (coverUrl) {
-      const coverJpg = await getImageUrlAsJpeg(coverUrl, 450, 450);
+      const coverJpg = await getImageUrlAsJpeg(coverUrl, 500, 500);
       if (coverJpg) {
-        const coverSize = 90; // 90mm x 90mm
-        doc.addImage(coverJpg, 'JPEG', pageW/2 - coverSize/2, 106, coverSize, coverSize);
+        const coverSize = 105; // 105mm x 105mm
+        doc.addImage(coverJpg, 'JPEG', pageW/2 - coverSize/2, 104, coverSize, coverSize);
         // Draw subtle border around artwork
         doc.setDrawColor(40, 40, 60);
         doc.setLineWidth(0.5);
-        doc.rect(pageW/2 - coverSize/2, 106, coverSize, coverSize);
+        doc.rect(pageW/2 - coverSize/2, 104, coverSize, coverSize);
       }
     }
 
@@ -455,31 +455,71 @@ async function exportToPDF() {
     doc.text('Artists',cA,y+5.5); doc.text('ISRC',cI,y+5.5); doc.text('Spotify',cLn,y+5.5);
     y += 10;
 
-    function trunc(text, maxW, fs) {
-      doc.setFontSize(fs);
-      if (doc.getTextWidth(text) <= maxW) return text;
-      while (doc.getTextWidth(text+'…') > maxW && text.length > 0) text = text.slice(0,-1);
-      return text+'…';
-    }
-
     allTracks.forEach((track, i) => {
-      const rH = 11; checkPage(rH+2);
-      if (i%2===0) { doc.setFillColor(248,250,252); doc.rect(mL,y-1,cW,rH,'F'); }
-      doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(140,140,160);
-      doc.text(String(i+1), cN, y+6);
-      doc.setTextColor(20,20,40); doc.setFont('helvetica','bold');
-      doc.text(trunc(track.name,62,8), cS, y+5);
-      doc.setFont('helvetica','normal'); doc.setFontSize(6.5); doc.setTextColor(160,160,180);
-      doc.text(trunc(track.album,62,6.5), cS, y+9);
-      doc.setFontSize(7.5); doc.setTextColor(60,60,100);
-      doc.text(trunc(track.artists,50,7.5), cA, y+6);
-      doc.setFont('helvetica','bold'); doc.setFontSize(7); doc.setTextColor(0,150,136);
-      doc.text(track.isrc !== '—' ? track.isrc : '—', cI, y+6);
-      doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(29,185,84);
-      const tid = track.url.replace('https://open.spotify.com/track/','').slice(0,12);
-      doc.textWithLink(tid+'…', cLn, y+6, {url: track.url});
-      doc.setDrawColor(225,228,240); doc.setLineWidth(0.2);
-      doc.line(mL, y+rH-1, mL+cW, y+rH-1);
+      // Split text to fit columns for multi-line wrapping
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
+      const songLines = doc.splitTextToSize(track.name, 62);
+      
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5);
+      const albumLines = doc.splitTextToSize(track.album, 62);
+      
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+      const artistLines = doc.splitTextToSize(track.artists, 50);
+
+      // Calculate row height dynamically
+      const songH = songLines.length * 3.2 + albumLines.length * 2.6 + 3.5;
+      const artistH = artistLines.length * 3.0 + 3.5;
+      const rH = Math.max(12, songH, artistH);
+
+      checkPage(rH + 2);
+
+      // Alternate row backgrounds
+      if (i % 2 === 0) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(mL, y - 1, cW, rH, 'F');
+      }
+
+      // Draw index
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(140, 140, 160);
+      doc.text(String(i + 1), cN, y + 5.5);
+
+      // Draw Song Lines
+      let songY = y + 4.5;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(20, 20, 40);
+      songLines.forEach(line => {
+        doc.text(line, cS, songY);
+        songY += 3.2;
+      });
+
+      // Draw Album Lines
+      let albumY = songY - 0.4;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(160, 160, 180);
+      albumLines.forEach(line => {
+        doc.text(line, cS, albumY);
+        albumY += 2.6;
+      });
+
+      // Draw Artist Lines
+      let artistY = y + 5.0;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(60, 60, 100);
+      artistLines.forEach(line => {
+        doc.text(line, cA, artistY);
+        artistY += 3.0;
+      });
+
+      // Draw ISRC (centered vertically in row)
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(0, 150, 136);
+      doc.text(track.isrc !== '—' ? track.isrc : '—', cI, y + (rH / 2) + 1);
+
+      // Draw Spotify link (centered vertically in row)
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(29, 185, 84);
+      const tid = track.url.replace('https://open.spotify.com/track/', '').slice(0, 12);
+      doc.textWithLink(tid + '…', cLn, y + (rH / 2) + 1, { url: track.url });
+
+      // Draw cell separator line
+      doc.setDrawColor(225, 228, 240); doc.setLineWidth(0.2);
+      doc.line(mL, y + rH - 1, mL + cW, y + rH - 1);
+
       y += rH;
     });
 
