@@ -17,5 +17,18 @@
   },
   "action": {
     "default_title": "Playlist Exporter"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://playlistinfoexporter.vercel.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "page-connector.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
 }

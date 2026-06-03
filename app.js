@@ -620,12 +620,16 @@ async function exportToPDF() {
 
 // ─── Google AI Mode Helpers ───────────────────
 
+let hasExtension = false;
+const pendingRequests = new Map();
+
 function checkExtensionPresence() {
-  const isExt = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
+  const isNativeExt = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
+  const isPresent = isNativeExt || hasExtension;
   const toggleContainer = document.getElementById('aiModeContainer');
   const installContainer = document.getElementById('aiModeInstallContainer');
   
-  if (isExt) {
+  if (isPresent) {
     if (toggleContainer) toggleContainer.style.display = 'block';
     if (installContainer) installContainer.style.display = 'none';
   } else {
@@ -649,6 +653,41 @@ function initAiToggleListener() {
   }
 }
 
+function askGoogleAiLang(song, artists) {
+  // Scenario A: Native Extension Tab context
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        { type: 'ASK_GOOGLE_AI_LANG', song, artists },
+        (res) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (res && res.ok) {
+            resolve(res.language);
+          } else {
+            reject(new Error(res?.error || 'AI Mode failed.'));
+          }
+        }
+      );
+    });
+  }
+
+  // Scenario B: Webpage context communicating via Page Connector content script
+  return new Promise((resolve, reject) => {
+    const key = `${song}||${artists}`;
+    pendingRequests.set(key, {
+      resolve,
+      reject,
+      timeout: setTimeout(() => {
+        pendingRequests.delete(key);
+        reject(new Error("Google AI took too long to respond."));
+      }, 25000)
+    });
+
+    window.postMessage({ type: "FROM_PAGE_ASK_AI_LANG", song, artists }, "*");
+  });
+}
+
 async function startGoogleAiLanguageDetection() {
   if (aiDetectionInProgress) return;
   aiDetectionInProgress = true;
@@ -670,21 +709,7 @@ async function startGoogleAiLanguageDetection() {
     }
 
     try {
-      const response = await new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(
-          { type: 'ASK_GOOGLE_AI_LANG', song: track.name, artists: track.artists },
-          (res) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else if (res && res.ok) {
-              resolve(res.language);
-            } else {
-              reject(new Error(res?.error || 'AI Mode failed.'));
-            }
-          }
-        );
-      });
-
+      const response = await askGoogleAiLang(track.name, track.artists);
       track.language = response;
 
       if (badge) {
@@ -713,6 +738,32 @@ async function startGoogleAiLanguageDetection() {
   aiDetectionInProgress = false;
 }
 
+// Listen to webpage postMessage channel from content script
+window.addEventListener("message", (event) => {
+  if (event.source !== window) return;
+
+  if (event.data?.type === "PONG_PLAYLIST_EXPORTER_EXT") {
+    hasExtension = true;
+    checkExtensionPresence();
+  }
+
+  if (event.data?.type === "FROM_EXT_AI_LANG_RESPONSE") {
+    const { ok, language, error, song } = event.data;
+    for (const [key, promise] of pendingRequests.entries()) {
+      if (key.startsWith(song + "||")) {
+        clearTimeout(promise.timeout);
+        pendingRequests.delete(key);
+        if (ok) {
+          promise.resolve(language);
+        } else {
+          promise.reject(new Error(error || "AI Mode failed."));
+        }
+        break;
+      }
+    }
+  }
+});
+
 // ─── Init ─────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -726,7 +777,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Update UI based on auth state
   updateAuthUI();
 
-  // Check extension presence and setup toggles
+  // Ping for extension presence and setup toggles
+  window.postMessage({ type: "PING_PLAYLIST_EXPORTER_EXT" }, "*");
   checkExtensionPresence();
   initAiToggleListener();
 
