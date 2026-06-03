@@ -159,7 +159,7 @@ async function fetchPlaylist() {
     
     if (!playlistData || !playlistData.tracks) {
       console.error('Playlist response:', playlistData);
-      throw new Error('Playlist data could not be retrieved. Make sure the playlist is public (not private or collaborative) and the URL is correct.');
+      throw new Error(`Playlist data could not be retrieved. Response keys: ${playlistData ? Object.keys(playlistData).join(', ') : 'null'}. Response string: ${JSON.stringify(playlistData)}`);
     }
     
     const total = playlistData.tracks.total;
