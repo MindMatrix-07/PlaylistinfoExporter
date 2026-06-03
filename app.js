@@ -504,11 +504,15 @@ async function exportToPDF() {
     }
 
     doc.setFontSize(8.5); doc.setTextColor(29,185,84);
-    doc.text(playlistData?.external_urls?.spotify || '', pageW/2, pageH-26, {align:'center'});
-    doc.setFont('helvetica','italic'); doc.setFontSize(7.5); doc.setTextColor(140,140,150);
-    doc.text('Note: AI language detection is search-based and may occasionally make mistakes.', pageW/2, pageH-20, {align:'center'});
+    doc.text(playlistData?.external_urls?.spotify || '', pageW/2, pageH-30, {align:'center'});
+    doc.setFont('helvetica','italic'); doc.setFontSize(7); doc.setTextColor(140,140,150);
+    doc.text('Note: AI language detection is search-based and may occasionally make mistakes.', pageW/2, pageH-23, {align:'center'});
     doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(80,80,100);
-    doc.text('Generated with Playlist Info Exporter', pageW/2, pageH-14, {align:'center'});
+    doc.text('Generated with Playlist Info Exporter', pageW/2, pageH-16, {align:'center'});
+    doc.setFontSize(7.5); doc.setTextColor(80,80,110);
+    const ghLabel = '\uD83D\uDC19 github.com/MindMatrix-07/Playlist-Exporter';
+    const ghLabelWidth = doc.getTextWidth(ghLabel);
+    doc.textWithLink(ghLabel, pageW/2 - ghLabelWidth/2, pageH-9, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
 
     // Tracks
     doc.addPage(); drawHeader(); y = 32;
@@ -640,13 +644,16 @@ async function exportToPDF() {
       y += rH;
     });
 
-    y += 6; checkPage(12);
+    y += 6; checkPage(14);
     doc.setFont('helvetica','italic'); doc.setFontSize(7.5); doc.setTextColor(160,160,180);
     let footerNote = `Total: ${allTracks.length} tracks · Exported ${new Date().toLocaleDateString()} · Includes ISRC`;
     if (isAiOn) {
       footerNote += ` · Note: AI language detection may make mistakes.`;
     }
     doc.text(footerNote, mL, y);
+    y += 5;
+    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(80,80,110);
+    doc.textWithLink('\uD83D\uDC19 github.com/MindMatrix-07/Playlist-Exporter', mL, y, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
 
     const safe = (playlistData?.name||'playlist').replace(/[^a-z0-9]/gi,'_').toLowerCase();
     
