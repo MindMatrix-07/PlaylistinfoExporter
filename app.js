@@ -204,14 +204,17 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
     }
     const data = await resp.json();
 
-    const items = (data.items || []).filter(i => i && i.track && i.track.id);
-    tracks = tracks.concat(items.map(i => ({
-      name:    i.track.name    || 'Unknown',
-      artists: (i.track.artists || []).map(a => a.name).join(', '),
-      album:   i.track.album?.name || '',
-      url:     i.track.external_urls?.spotify || `https://open.spotify.com/track/${i.track.id}`,
-      isrc:    i.track.external_ids?.isrc || '—',
-    })));
+    const items = (data.items || []).filter(i => i && (i.track || i.item) && (i.track || i.item).id);
+    tracks = tracks.concat(items.map(i => {
+      const t = i.track || i.item;
+      return {
+        name:    t.name    || 'Unknown',
+        artists: (t.artists || []).map(a => a.name).join(', '),
+        album:   t.album?.name || '',
+        url:     t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
+        isrc:    t.external_ids?.isrc || '—',
+      };
+    }));
 
     if (onProgress) onProgress(tracks.length, totalExpected || data.total);
     if (!data.next) break;
