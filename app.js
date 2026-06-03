@@ -427,13 +427,14 @@ async function exportToPDF() {
     // Draw Playlist Cover Image in the blank space
     const coverUrl = playlistData.images?.[0]?.url;
     if (coverUrl) {
-      const coverJpg = await getImageUrlAsJpeg(coverUrl, 320, 320);
+      const coverJpg = await getImageUrlAsJpeg(coverUrl, 450, 450);
       if (coverJpg) {
-        doc.addImage(coverJpg, 'JPEG', pageW/2 - 32, 106, 64, 64);
+        const coverSize = 90; // 90mm x 90mm
+        doc.addImage(coverJpg, 'JPEG', pageW/2 - coverSize/2, 106, coverSize, coverSize);
         // Draw subtle border around artwork
         doc.setDrawColor(40, 40, 60);
         doc.setLineWidth(0.5);
-        doc.rect(pageW/2 - 32, 106, 64, 64);
+        doc.rect(pageW/2 - coverSize/2, 106, coverSize, coverSize);
       }
     }
 
