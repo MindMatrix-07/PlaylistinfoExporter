@@ -499,14 +499,6 @@ async function exportToPDF() {
         const coverY = 98;
         const coverX = pageW / 2 - coverSize / 2;
         doc.addImage(coverJpg, 'JPEG', coverX, coverY, coverSize, coverSize);
-        // Outer glow border (green, slightly larger)
-        doc.setDrawColor(29, 185, 84);
-        doc.setLineWidth(1.2);
-        doc.rect(coverX - 1, coverY - 1, coverSize + 2, coverSize + 2);
-        // Inner sharp border
-        doc.setDrawColor(40, 40, 60);
-        doc.setLineWidth(0.4);
-        doc.rect(coverX, coverY, coverSize, coverSize);
       }
     }
 
