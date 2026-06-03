@@ -85,19 +85,18 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
   let tracks = [];
 
   while (true) {
-    // Request external_ids (contains ISRC) along with other track fields
-    const fields = 'items(track(id,name,artists(name),album(name),external_urls,external_ids)),next,total';
+    // No fields filter — avoids 403 from Spotify on some app configurations
     const resp = await fetch(
-      `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=${limit}&offset=${offset}&fields=${encodeURIComponent(fields)}`,
+      `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=${limit}&offset=${offset}`,
       { headers: { 'Authorization': `Bearer ${token}` } }
     );
     if (!resp.ok) throw new Error(`Failed to fetch tracks (${resp.status})`);
     const data = await resp.json();
 
-    const items = data.items.filter(i => i.track && i.track.id);
+    const items = (data.items || []).filter(i => i && i.track && i.track.id);
     tracks = tracks.concat(items.map(i => ({
-      name:    i.track.name,
-      artists: i.track.artists.map(a => a.name).join(', '),
+      name:    i.track.name    || 'Unknown',
+      artists: (i.track.artists || []).map(a => a.name).join(', '),
       album:   i.track.album?.name || '',
       url:     i.track.external_urls?.spotify || `https://open.spotify.com/track/${i.track.id}`,
       isrc:    i.track.external_ids?.isrc || '—'
