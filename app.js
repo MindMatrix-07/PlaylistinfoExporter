@@ -622,9 +622,15 @@ async function exportToPDF() {
 
 function checkExtensionPresence() {
   const isExt = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
-  const container = document.getElementById('aiModeContainer');
-  if (container) {
-    container.style.display = isExt ? 'block' : 'none';
+  const toggleContainer = document.getElementById('aiModeContainer');
+  const installContainer = document.getElementById('aiModeInstallContainer');
+  
+  if (isExt) {
+    if (toggleContainer) toggleContainer.style.display = 'block';
+    if (installContainer) installContainer.style.display = 'none';
+  } else {
+    if (toggleContainer) toggleContainer.style.display = 'none';
+    if (installContainer) installContainer.style.display = 'block';
   }
 }
 
