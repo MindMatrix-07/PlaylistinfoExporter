@@ -550,8 +550,10 @@ function exportToHTML() {
     * { box-sizing: border-box; }
     body { margin: 0; color: var(--ink); background: #f3f6f8; }
     header { background: #0a0a14; color: white; padding: 28px 32px; border-top: 12px solid var(--green); }
-    .head { max-width: 1180px; margin: 0 auto; display: flex; gap: 20px; align-items: center; }
+    .head { max-width: 1180px; margin: 0 auto; display: grid; grid-template-columns: auto 1fr auto; gap: 20px; align-items: center; }
     .cover { width: 86px; height: 86px; border-radius: 8px; object-fit: cover; background: #202436; }
+    .spotify-mark { width: 86px; height: 86px; border-radius: 50%; border: 2px solid rgba(255,255,255,.82); display: flex; align-items: center; justify-content: center; opacity: .92; }
+    .spotify-mark svg { width: 56px; height: 56px; display: block; }
     h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.15; }
     .meta { margin: 0; color: #b8c0d4; font-size: 14px; }
     main { max-width: 1180px; margin: 24px auto 48px; padding: 0 18px; }
@@ -572,7 +574,7 @@ function exportToHTML() {
     .open-link { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 32px; border: 1px solid var(--green); color: #087f3f; border-radius: 7px; text-decoration: none; font-weight: 700; }
     .done-cell { text-align: center; width: 64px; }
     input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--green); cursor: pointer; }
-    @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5) { display:none; } .head { align-items:flex-start; } }
+    @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5) { display:none; } .head { grid-template-columns: auto 1fr; align-items:flex-start; } .spotify-mark { display:none; } }
   </style>
 </head>
 <body>
@@ -582,6 +584,14 @@ function exportToHTML() {
       <div>
         <h1>${escHtml(playlistName)}</h1>
         <p class="meta">By ${escHtml(playlistOwner)} · ${allTracks.length} tracks · Exported ${escHtml(exportedAt)}${playlistUrl ? ` · <a href="${escAttr(playlistUrl)}" target="_blank" rel="noopener" style="color:#7df0a2">Open playlist</a>` : ''}</p>
+      </div>
+      <div class="spotify-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="11" stroke="white" stroke-width="1.4"/>
+          <path d="M7 9.25c3.25-1 6.4-.72 9.45.85" stroke="white" stroke-width="1.55" stroke-linecap="round"/>
+          <path d="M7.45 12c2.65-.78 5.2-.55 7.7.7" stroke="white" stroke-width="1.35" stroke-linecap="round"/>
+          <path d="M7.9 14.55c2.02-.55 4-.37 5.95.55" stroke="white" stroke-width="1.15" stroke-linecap="round"/>
+        </svg>
       </div>
     </div>
   </header>
