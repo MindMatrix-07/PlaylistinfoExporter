@@ -517,6 +517,7 @@ function exportToHTML() {
     const exportedAt = new Date().toLocaleString();
     const safeName = makeSafeFilename(playlistName);
     const storageKey = `playlist-checklist:${safeName}:${allTracks.length}`;
+    const htmlFileName = `${safeName}_checklist.html`;
     const spotifyLogoUrl = new URL('Spotify_Primary_Logo_RGB_White.png', window.location.href).href;
 
     const rows = allTracks.map((track, index) => {
@@ -558,11 +559,12 @@ function exportToHTML() {
     .spotify-mark img { width: 86px; height: 86px; object-fit: contain; display: block; }
     h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.15; }
     .meta { margin: 0; color: #b8c0d4; font-size: 14px; }
-    main { max-width: 1180px; margin: 24px auto 48px; padding: 0 18px; }
+    main { max-width: 1180px; margin: 24px auto 34px; padding: 0 18px; }
     .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
     .toolbar p { margin: 0; color: var(--muted); font-size: 14px; }
     .toolbar-actions { display:flex; gap:10px; align-items:center; }
-    .clear, .theme-toggle { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 9px 12px; cursor: pointer; }
+    .clear, .theme-toggle, .save-copy { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 7px; padding: 9px 12px; cursor: pointer; }
+    .save-copy { border-color: var(--green); color: #087f3f; font-weight: 700; }
     table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 12px 32px rgba(16,24,40,.08); }
     th { background: var(--green); color: white; text-align: left; font-size: 13px; padding: 11px 10px; }
     td { border-top: 1px solid var(--line); padding: 10px; vertical-align: middle; font-size: 14px; }
@@ -577,6 +579,8 @@ function exportToHTML() {
     .open-link { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 32px; border: 1px solid var(--green); color: #087f3f; border-radius: 7px; text-decoration: none; font-weight: 700; }
     .done-cell { text-align: center; width: 64px; }
     input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--green); cursor: pointer; }
+    .site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 18px 36px; }
+    .site-footer a { color: var(--green); font-weight: 700; text-decoration: none; margin: 0 8px; }
     @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5) { display:none; } .head { grid-template-columns: auto 1fr; align-items:flex-start; } .spotify-mark { display:none; } }
   </style>
 </head>
@@ -597,6 +601,7 @@ function exportToHTML() {
     <div class="toolbar">
       <p>Done ticks are saved in this browser for this HTML checklist.</p>
       <div class="toolbar-actions">
+        <button class="save-copy" id="saveCopy">Save HTML Copy</button>
         <button class="theme-toggle" id="themeToggle">Dark Mode</button>
         <button class="clear" id="clearDone">Clear Done</button>
       </div>
@@ -606,22 +611,60 @@ function exportToHTML() {
       <tbody>${rows}</tbody>
     </table>
   </main>
+  <footer class="site-footer">
+    <a href="https://playlistinfoexporter.vercel.app/" target="_blank" rel="noopener">playlistinfoexporter.vercel.app</a>
+    <a href="https://playlistinfoexporter.onrender.com/" target="_blank" rel="noopener">playlistinfoexporter.onrender.com</a>
+  </footer>
+  <script type="application/json" id="embeddedDone">{}</script>
+  <script type="application/json" id="embeddedTheme">"light"</script>
   <script>
     const storageKey = ${JSON.stringify(storageKey)};
+    const fileName = ${JSON.stringify(htmlFileName)};
     const themeKey = storageKey + ':theme';
     const themeToggle = document.getElementById('themeToggle');
+    const embeddedDone = document.getElementById('embeddedDone');
+    const embeddedTheme = document.getElementById('embeddedTheme');
+    function readEmbeddedJson(el, fallback) {
+      try { return JSON.parse(el.textContent || ''); } catch (_) { return fallback; }
+    }
     function applyTheme(theme) {
       document.documentElement.dataset.theme = theme;
       themeToggle.textContent = theme === 'dark' ? 'Light Mode' : 'Dark Mode';
       localStorage.setItem(themeKey, theme);
+      embeddedTheme.textContent = JSON.stringify(theme);
     }
-    applyTheme(localStorage.getItem(themeKey) || 'light');
+    const embeddedThemeValue = readEmbeddedJson(embeddedTheme, 'light');
+    applyTheme(localStorage.getItem(themeKey) || embeddedThemeValue || 'light');
     themeToggle.addEventListener('click', () => {
       applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+      updateEmbeddedState();
     });
-    const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    const embeddedState = readEmbeddedJson(embeddedDone, {});
+    const saved = Object.assign({}, embeddedState, JSON.parse(localStorage.getItem(storageKey) || '{}'));
     const boxes = document.querySelectorAll('input[type="checkbox"][data-track-key]');
     function syncRow(box) { box.closest('tr').classList.toggle('done', box.checked); }
+    function currentDoneState() {
+      const state = {};
+      boxes.forEach(box => { if (box.checked) state[box.dataset.trackKey] = true; });
+      return state;
+    }
+    function updateEmbeddedState() {
+      embeddedDone.textContent = JSON.stringify(currentDoneState());
+      embeddedTheme.textContent = JSON.stringify(document.documentElement.dataset.theme || 'light');
+    }
+    function downloadCurrentHtml() {
+      updateEmbeddedState();
+      const html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
     boxes.forEach(box => {
       box.checked = saved[box.dataset.trackKey] === true;
       syncRow(box);
@@ -629,17 +672,21 @@ function exportToHTML() {
         saved[box.dataset.trackKey] = box.checked;
         localStorage.setItem(storageKey, JSON.stringify(saved));
         syncRow(box);
+        updateEmbeddedState();
       });
     });
+    updateEmbeddedState();
+    document.getElementById('saveCopy').addEventListener('click', downloadCurrentHtml);
     document.getElementById('clearDone').addEventListener('click', () => {
-      boxes.forEach(box => { box.checked = false; saved[box.dataset.trackKey] = false; syncRow(box); });
+      boxes.forEach(box => { box.checked = false; delete saved[box.dataset.trackKey]; syncRow(box); });
       localStorage.setItem(storageKey, JSON.stringify(saved));
+      updateEmbeddedState();
     });
   </script>
 </body>
 </html>`;
 
-    downloadTextFile(`${safeName}_checklist.html`, html, 'text/html');
+    downloadTextFile(htmlFileName, html, 'text/html');
     showToast('HTML checklist downloaded.');
   } catch (err) {
     console.error('HTML export failed:', err);
