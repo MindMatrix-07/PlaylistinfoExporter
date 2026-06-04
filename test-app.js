@@ -55,6 +55,7 @@ function detectLanguage(title, isrc) {
 const SCOPES = 'playlist-read-private playlist-read-collaborative';
 const REDIRECT_URI = window.location.origin + '/test.html'; // Callback to test.html in lab
 const RENDER_ORIGIN = 'https://playlistinfoexporter.onrender.com';
+const VERCEL_ORIGIN = 'https://playlistinfoexporter.vercel.app';
 
 // ─── PKCE Helpers ────────────────────────────
 
@@ -161,10 +162,12 @@ function disconnectSpotify() {
 
 function setFetchMode(mode) {
   if (mode === 'web' && shouldForwardWebFetchToRender()) {
-    const renderUrl = new URL(window.location.pathname || '/', RENDER_ORIGIN);
-    renderUrl.searchParams.set('mode', 'web');
-    renderUrl.hash = 'web-fetch';
-    window.location.href = renderUrl.href;
+    window.location.href = makeModeUrl(RENDER_ORIGIN, 'web', 'web-fetch');
+    return;
+  }
+
+  if (mode === 'premium' && shouldForwardPremiumToVercel()) {
+    window.location.href = makeModeUrl(VERCEL_ORIGIN, 'premium', '');
     return;
   }
 
@@ -517,6 +520,17 @@ function copyToClipboard() {
 
 function shouldForwardWebFetchToRender() {
   return window.location.hostname === 'playlistinfoexporter.vercel.app';
+}
+
+function shouldForwardPremiumToVercel() {
+  return window.location.hostname === 'playlistinfoexporter.onrender.com';
+}
+
+function makeModeUrl(origin, mode, hash) {
+  const url = new URL(window.location.pathname || '/', origin);
+  url.searchParams.set('mode', mode);
+  url.hash = hash;
+  return url.href;
 }
 
 function exportToHTML() {
@@ -1320,7 +1334,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Load URL-requested mode, saved mode, or fallback to premium
   const params = new URLSearchParams(window.location.search);
   const requestedMode = params.get('mode');
-  const savedMode = requestedMode === 'web' ? 'web' : (localStorage.getItem('sp_fetch_mode') || 'premium');
+  const defaultMode = shouldForwardPremiumToVercel() ? 'web' : 'premium';
+  const savedMode = ['premium', 'web'].includes(requestedMode) ? requestedMode : (localStorage.getItem('sp_fetch_mode') || defaultMode);
   setFetchMode(savedMode);
   if (requestedMode === 'web') {
     setTimeout(() => {
