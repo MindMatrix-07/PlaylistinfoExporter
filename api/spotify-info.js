@@ -118,6 +118,7 @@ module.exports = async (req, res) => {
           album: { name: albumName || 'Unknown Album' },
           external_urls: { spotify: trackUrl },
           external_ids: { isrc },
+          preview_url: t.preview_url || t.previewUrl || '',
           albumArt
         }
       };

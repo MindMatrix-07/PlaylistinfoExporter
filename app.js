@@ -305,6 +305,7 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
         albumArt: t.album?.images?.[t.album.images.length - 1]?.url || t.album?.images?.[0]?.url || '',
         url:     t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
         isrc:    isrc,
+        previewUrl: t.preview_url || '',
         language: ''
       };
     }));
@@ -361,6 +362,7 @@ async function fetchPlaylist() {
           albumArt: t.albumArt,
           url: t.external_urls?.spotify,
           isrc: t.external_ids?.isrc || '—',
+          previewUrl: t.preview_url || '',
           language: ''
         };
       });
@@ -538,11 +540,16 @@ function exportToHTML() {
 
     const rows = allTracks.map((track, index) => {
       const trackKey = getTrackKey(track, index);
+      const artMarkup = track.albumArt
+        ? track.previewUrl
+          ? `<button class="art-play no-copy" type="button" data-preview-url="${escAttr(track.previewUrl)}" aria-label="Play preview for ${escAttr(track.name)}"><img src="${escAttr(track.albumArt)}" alt="" draggable="false"><span class="play-state">&#9654;</span></button>`
+          : `<img class="no-copy song-art" src="${escAttr(track.albumArt)}" alt="" draggable="false" title="No preview available">`
+        : '<span class="art-placeholder no-copy" title="No preview available"></span>';
       return `
         <tr>
           <td class="num">${index + 1}</td>
           <td class="song">
-            ${track.albumArt ? `<img class="no-copy" src="${escAttr(track.albumArt)}" alt="" draggable="false">` : '<span class="art-placeholder no-copy"></span>'}
+            ${artMarkup}
             <div>
               <strong>${escHtml(track.name)}</strong>
               <span class="album-name no-copy">${escHtml(track.album || '')}</span>
@@ -587,7 +594,13 @@ function exportToHTML() {
     tr.done .song strong { text-decoration: line-through; color: var(--muted); }
     .num { width: 42px; color: var(--muted); }
     .song { display: flex; gap: 10px; align-items: center; min-width: 280px; }
-    .song img, .art-placeholder { width: 44px; height: 44px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; background: var(--line); }
+    .song-art, .song img, .art-placeholder, .art-play { width: 44px; height: 44px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; background: var(--line); }
+    .art-play { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; cursor: pointer; overflow: hidden; }
+    .art-play img { width: 100%; height: 100%; border-radius: 5px; object-fit: cover; display: block; transition: filter .18s, transform .18s; }
+    .art-play .play-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; background: rgba(0,0,0,.45); font-size: 16px; font-weight: 800; opacity: 0; transition: opacity .18s; text-shadow: 0 1px 6px rgba(0,0,0,.8); }
+    .art-play:hover img, .art-play.playing img { filter: brightness(.65); transform: scale(1.04); }
+    .art-play:hover .play-state, .art-play.playing .play-state { opacity: 1; }
+    .art-play.playing .play-state { background: rgba(29,185,84,.72); }
     .song strong { display: block; margin-bottom: 4px; }
     .song span { color: var(--muted); font-size: 12px; }
     code { color: #00897b; font-weight: 700; font-family: inherit; }
@@ -641,6 +654,8 @@ function exportToHTML() {
     const themeToggle = document.getElementById('themeToggle');
     const embeddedDone = document.getElementById('embeddedDone');
     const embeddedTheme = document.getElementById('embeddedTheme');
+    const previewAudio = new Audio();
+    let activePreviewButton = null;
     function readEmbeddedJson(el, fallback) {
       try { return JSON.parse(el.textContent || ''); } catch (_) { return fallback; }
     }
@@ -663,6 +678,43 @@ function exportToHTML() {
       img.addEventListener('contextmenu', event => event.preventDefault());
       img.addEventListener('dragstart', event => event.preventDefault());
     });
+    function stopPreview() {
+      previewAudio.pause();
+      previewAudio.removeAttribute('src');
+      previewAudio.load();
+      if (activePreviewButton) {
+        activePreviewButton.classList.remove('playing');
+        const state = activePreviewButton.querySelector('.play-state');
+        if (state) state.textContent = '\\u25b6';
+      }
+      activePreviewButton = null;
+    }
+    document.querySelectorAll('.art-play[data-preview-url]').forEach(button => {
+      button.addEventListener('contextmenu', event => event.preventDefault());
+      button.addEventListener('dragstart', event => event.preventDefault());
+      button.addEventListener('click', () => {
+        const previewUrl = button.dataset.previewUrl;
+        if (!previewUrl) return;
+        if (activePreviewButton === button && !previewAudio.paused) {
+          stopPreview();
+          return;
+        }
+        stopPreview();
+        activePreviewButton = button;
+        button.classList.add('playing');
+        const state = button.querySelector('.play-state');
+        if (state) state.textContent = '\\u275a\\u275a';
+        previewAudio.src = previewUrl;
+        previewAudio.play().catch(() => {
+          if (state) state.textContent = '!';
+          setTimeout(stopPreview, 800);
+        });
+      });
+    });
+    previewAudio.addEventListener('ended', stopPreview);
+    previewAudio.addEventListener('pause', () => {
+      if (previewAudio.ended) stopPreview();
+    });
     function syncRow(box) { box.closest('tr').classList.toggle('done', box.checked); }
     function currentDoneState() {
       const state = {};
@@ -674,6 +726,7 @@ function exportToHTML() {
       embeddedTheme.textContent = JSON.stringify(document.documentElement.dataset.theme || 'light');
     }
     function downloadCurrentHtml() {
+      stopPreview();
       updateEmbeddedState();
       const html = '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
       const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
