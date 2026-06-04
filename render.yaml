@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: playlist-info-exporter
+    env: node
+    buildCommand: npm install
+    startCommand: npm start

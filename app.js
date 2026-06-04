@@ -1,10 +1,11 @@
 /* ============================================
-   Spotify Playlist Exporter v2.0 — PKCE OAuth
+   Spotify Playlist Exporter v3.0
    ============================================ */
 
 let allTracks = [];
 let playlistData = null;
 let aiDetectionInProgress = false;
+let activeMode = 'premium'; // 'premium' or 'web'
 
 // Heuristic Language Detector
 function detectLanguage(title, isrc) {
@@ -155,14 +156,47 @@ function disconnectSpotify() {
   updateAuthUI();
 }
 
+// ─── Mode Selector ───────────────────────────
+
+function setFetchMode(mode) {
+  activeMode = mode;
+  localStorage.setItem('sp_fetch_mode', mode);
+
+  // Toggle active class on buttons
+  const premiumBtn = document.getElementById('modePremiumBtn');
+  const webBtn = document.getElementById('modeWebBtn');
+
+  if (mode === 'premium') {
+    premiumBtn.classList.add('active');
+    webBtn.classList.remove('active');
+    document.getElementById('webFetchInfoBox').style.display = 'none';
+  } else {
+    premiumBtn.classList.remove('active');
+    webBtn.classList.add('active');
+    document.getElementById('webFetchInfoBox').style.display = 'flex';
+  }
+
+  updateAuthUI();
+}
+
 // ─── UI State ─────────────────────────────────
 
 function updateAuthUI() {
   const token = getToken();
-  document.getElementById('authCard').style.display     = token ? 'none'  : 'block';
-  document.getElementById('playlistCard').style.display  = token ? 'block' : 'none';
-  document.getElementById('connectedStatus').style.display  = token ? 'flex'  : 'none';
-  document.getElementById('notConnectedBadge').style.display = token ? 'none' : 'block';
+
+  if (activeMode === 'premium') {
+    document.getElementById('authCard').style.display     = token ? 'none'  : 'block';
+    document.getElementById('playlistCard').style.display  = token ? 'block' : 'none';
+    document.getElementById('connectedStatus').style.display  = token ? 'flex'  : 'none';
+    document.getElementById('notConnectedBadge').style.display = token ? 'none' : 'block';
+  } else {
+    // Web fetch mode doesn't need auth card or connected status
+    document.getElementById('authCard').style.display     = 'none';
+    document.getElementById('playlistCard').style.display  = 'block';
+    document.getElementById('connectedStatus').style.display  = 'none';
+    document.getElementById('notConnectedBadge').style.display = 'block';
+    document.getElementById('notConnectedBadge').textContent = 'Web Fetch';
+  }
 
   // Restore saved clientId
   const savedId = localStorage.getItem('sp_client_id');
@@ -285,47 +319,100 @@ async function fetchPlaylist() {
     return;
   }
 
-  const token = getToken();
-  if (!token) {
-    showError('Session expired — please reconnect Spotify.', 'errorBox2');
-    disconnectSpotify();
-    return;
-  }
-
   localStorage.setItem('sp_last_url', rawUrl);
   setFetchBtn(true);
   document.getElementById('resultsSection').style.display = 'none';
-  setLoading(true, 'Fetching playlist info…');
 
-  try {
-    playlistData = await fetchPlaylistMeta(token, playlistId);
-    if (!playlistData || playlistData.error) {
-      throw new Error(`Could not load playlist: ${playlistData?.error?.message || 'unknown error'}`);
+  if (activeMode === 'web') {
+    // WEB FETCH MODE (Calls Serverless Endpoint)
+    setLoading(true, 'Fetching playlist via Web Fetch…');
+    try {
+      const apiUrl = `/api/spotify-info?url=${encodeURIComponent(rawUrl)}`;
+      const resp = await fetch(apiUrl);
+      if (!resp.ok) {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.error || `HTTP ${resp.status}`);
+      }
+      
+      const resData = await resp.json();
+      playlistData = {
+        name: resData.name,
+        owner: resData.owner,
+        images: resData.images,
+        external_urls: { spotify: rawUrl }
+      };
+
+      allTracks = resData.tracks.items.map(item => {
+        const t = item.track;
+        return {
+          name: t.name,
+          artists: t.artists.map(a => a.name).join(', '),
+          album: t.album?.name || '',
+          albumArt: t.albumArt,
+          url: t.external_urls?.spotify,
+          isrc: t.external_ids?.isrc || '—',
+          language: ''
+        };
+      });
+
+      setLoading(false);
+      renderResults();
+
+      // Trigger Google AI language detection if selected
+      const aiModeCheckbox = document.getElementById('aiModeCheckbox');
+      if (aiModeCheckbox && aiModeCheckbox.checked) {
+        aiDetectionInProgress = false;
+        setTimeout(() => {
+          startGoogleAiLanguageDetection();
+        }, 100);
+      }
+    } catch (err) {
+      setLoading(false);
+      showError(err.message || 'Something went wrong during Web Fetch.', 'errorBox2');
+    } finally {
+      setFetchBtn(false);
+    }
+  } else {
+    // SPOTIFY PREMIUM MODE (PKCE Access Flow)
+    const token = getToken();
+    if (!token) {
+      showError('Session expired — please reconnect Spotify.', 'errorBox2');
+      disconnectSpotify();
+      setFetchBtn(false);
+      return;
     }
 
-    const total = playlistData?.tracks?.total ?? null;
-    setLoading(true, `Fetching tracks${total ? ` (0 / ${total})` : '…'}…`);
+    setLoading(true, 'Fetching playlist info…');
+    try {
+      playlistData = await fetchPlaylistMeta(token, playlistId);
+      if (!playlistData || playlistData.error) {
+        throw new Error(`Could not load playlist: ${playlistData?.error?.message || 'unknown error'}`);
+      }
 
-    allTracks = await fetchAllTracks(token, playlistId, total, (done, all) => {
-      setLoading(true, `Fetching tracks (${done}${all ? ' / ' + all : ''})…`);
-    });
+      const total = playlistData?.tracks?.total ?? null;
+      setLoading(true, `Fetching tracks${total ? ` (0 / ${total})` : '…'}…`);
 
-    setLoading(false);
-    renderResults();
+      allTracks = await fetchAllTracks(token, playlistId, total, (done, all) => {
+        setLoading(true, `Fetching tracks (${done}${all ? ' / ' + all : ''})…`);
+      });
 
-    const aiModeCheckbox = document.getElementById('aiModeCheckbox');
-    if (aiModeCheckbox && aiModeCheckbox.checked) {
-      aiDetectionInProgress = false;
-      setTimeout(() => {
-        startGoogleAiLanguageDetection();
-      }, 100);
+      setLoading(false);
+      renderResults();
+
+      const aiModeCheckbox = document.getElementById('aiModeCheckbox');
+      if (aiModeCheckbox && aiModeCheckbox.checked) {
+        aiDetectionInProgress = false;
+        setTimeout(() => {
+          startGoogleAiLanguageDetection();
+        }, 100);
+      }
+
+    } catch (err) {
+      setLoading(false);
+      showError(err.message || 'Something went wrong.', 'errorBox2');
+    } finally {
+      setFetchBtn(false);
     }
-
-  } catch (err) {
-    setLoading(false);
-    showError(err.message || 'Something went wrong.', 'errorBox2');
-  } finally {
-    setFetchBtn(false);
   }
 }
 
@@ -349,34 +436,43 @@ function renderResults() {
     </div>`;
 
   document.getElementById('trackCountLabel').innerHTML = `<strong>${allTracks.length}</strong> tracks found`;
-  document.getElementById('connectedName').textContent = '✓ Connected';
 
   const body = document.getElementById('tracksBody');
   body.innerHTML = '';
+
+  const aiModeCheckbox = document.getElementById('aiModeCheckbox');
+  const isAiOn = aiModeCheckbox && aiModeCheckbox.checked;
+
   allTracks.forEach((track, i) => {
     const row = document.createElement('div');
     row.className = 'track-row';
     row.style.animationDelay = `${Math.min(i * 18, 500)}ms`;
     row.innerHTML = `
       <span class="col-num">${i + 1}</span>
-      <div class="col-title">
-        <span class="track-name" title="${escHtml(track.name)}">${escHtml(track.name)}</span>
-        <span class="track-album" title="${escHtml(track.album)}">${escHtml(track.album)}</span>
+      <div class="col-title" style="flex-direction: row; align-items: center; gap: 8px;">
+        ${track.albumArt ? `<img class="track-thumb" src="${track.albumArt}" style="width: 28px; height: 28px; border-radius: 4px; flex-shrink: 0;" />` : `<div style="width:28px; height:28px; background: rgba(255,255,255,0.05); border-radius: 4px; flex-shrink: 0;"></div>`}
+        <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1;">
+          <span class="track-name" title="${escHtml(track.name)}">${escHtml(track.name)}</span>
+          <span class="track-album" title="${escHtml(track.album)}">${escHtml(track.album)}</span>
+        </div>
       </div>
       <span class="col-artists" title="${escHtml(track.artists)}">${escHtml(track.artists)}</span>
       <span class="col-isrc"><span class="isrc-badge">${escHtml(track.isrc)}</span></span>
-      <span class="col-lang"><span class="lang-badge">${escHtml(track.language)}</span></span>
+      <span class="col-lang">
+        <span class="lang-badge ${isAiOn ? 'scanning-text' : ''}" id="lang-badge-${i}">
+          ${isAiOn ? 'Scanning…' : escHtml(track.language || detectLanguage(track.name, track.isrc))}
+        </span>
+      </span>
       <span class="col-link">
         <a href="${track.url}" target="_blank">
           <svg viewBox="0 0 24 24" fill="none"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Open
         </a>
-      </span>`;
+      </span>
+    `;
     body.appendChild(row);
   });
 
-  const aiModeCheckbox = document.getElementById('aiModeCheckbox');
-  const isAiOn = aiModeCheckbox && aiModeCheckbox.checked;
   const table = document.querySelector('.tracks-table');
   if (table) {
     if (isAiOn) table.classList.remove('no-ai-mode');
@@ -385,136 +481,174 @@ function renderResults() {
 
   document.getElementById('resultsSection').style.display = 'block';
   document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showToast('Playlist loaded successfully.');
 }
 
 function escHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
-
-// ─── Copy All ─────────────────────────────────
 
 function copyToClipboard() {
   if (!allTracks.length) return;
-  const lines = allTracks.map((t, i) =>
-    `${i+1}. ${t.name}\n   Artists: ${t.artists}\n   ISRC: ${t.isrc}\n   Language: ${t.language}\n   Link: ${t.url}`);
-  const text = `${playlistData?.name || 'Playlist'} — ${allTracks.length} Tracks\n\n` + lines.join('\n\n');
+  const headerLine = 'Track #\tSong Name\tArtists\tISRC\tLanguage\tSpotify Link';
+  const rows = allTracks.map((t, idx) => {
+    const lang = t.language || detectLanguage(t.name, t.isrc);
+    return `${idx + 1}\t${t.name}\t${t.artists}\t${t.isrc}\t${lang}\t${t.url}`;
+  });
+  const text = [headerLine, ...rows].join('\n');
+
   navigator.clipboard.writeText(text)
-    .then(() => showToast('✓ Copied to clipboard!'))
-    .catch(() => showToast('Could not copy.'));
+    .then(() => showToast('Copied list tab-separated to clipboard.'))
+    .catch(() => showToast('Failed to copy. Please copy manually.'));
 }
 
-// Helper to convert Spotify logo SVG to PNG Data URL
-async function svgToPngDataUrl(svgString, width = 120, height = 120) {
+// ─── Image Downloader (Cover Art Base64) ─────
+
+async function getImageUrlAsJpeg(url, maxW, maxH) {
   return new Promise((resolve) => {
     const img = new Image();
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgString)));
+    img.crossOrigin = 'Anonymous';
     img.onload = () => {
+      let w = img.width;
+      let h = img.height;
+      if (w > maxW || h > maxH) {
+        const ratio = Math.min(maxW / w, maxH / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
       const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/png'));
+      ctx.drawImage(img, 0, 0, w, h);
+      try {
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      } catch (e) {
+        resolve(null);
+      }
     };
-    img.onerror = () => {
-      resolve(null);
-    };
-  });
-}
-
-// Helper to fetch external image URL and convert to JPEG Data URL
-async function getImageUrlAsJpeg(url, width = 300, height = 300) {
-  if (!url) return null;
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
+    img.onerror = () => resolve(null);
     img.src = url;
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL('image/jpeg', 0.85));
-    };
-    img.onerror = () => {
-      resolve(null);
-    };
   });
 }
 
-// ─── Export PDF ───────────────────────────────
+// ─── PDF Exporter ─────────────────────────────
 
 async function exportToPDF() {
-  if (!allTracks.length) return;
-  const btn = document.getElementById('pdfBtn');
-  btn.disabled = true; btn.textContent = 'Generating…';
+  if (!allTracks.length || !playlistData) return;
+
+  const pdfBtn  = document.getElementById('pdfBtn');
+  const copyBtn = document.getElementById('copyBtn');
+
+  if (pdfBtn)  pdfBtn.disabled = true;
+  if (copyBtn) copyBtn.disabled = true;
 
   try {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const mL = 12, mR = 12, cW = pageW - mL - mR;
+    const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+
+    const pageW = doc.internal.pageSize.getWidth(); // 210
+    const pageH = doc.internal.pageSize.getHeight(); // 297
+    const mL = 16;
+    const cW = pageW - (mL * 2);
+
     let y = 0;
 
-    function checkPage(n = 10) {
-      if (y + n > pageH - 16) { doc.addPage(); drawHeader(); y = 34; }
-    }
-    function drawHeader() {
-      doc.setFillColor(29,185,84); doc.rect(0,0,pageW,6,'F');
-      doc.setFillColor(248,249,252); doc.rect(0,6,pageW,20,'F');
-      const pn = doc.internal.getCurrentPageInfo().pageNumber;
-      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(160,160,160);
-      doc.text(`Page ${pn}`, pageW-mR, 14, {align:'right'});
-      doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(40,40,60);
-      doc.text(playlistData?.name || 'Playlist', mL, 14);
+    // Pre-fetch cover artwork
+    let coverJpg = null;
+    if (playlistData.images?.[0]?.url) {
+      setLoading(true, 'Downloading high-res cover art…');
+      coverJpg = await getImageUrlAsJpeg(playlistData.images[0].url, 800, 800);
     }
 
-    // Cover
-    doc.setFillColor(10,10,20); doc.rect(0,0,pageW,pageH,'F');
-    doc.setFillColor(29,185,84); doc.rect(0,0,pageW,55,'F');
-    doc.setFillColor(0,0,0); doc.circle(pageW/2,28,18,'F');
-    
-    // Draw Spotify Logo inside circle
-    const spotifySvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#1DB954"/><path d="M17.9 10.9C14.7 9 9.35 8.8 6.3 9.75c-.5.15-1-.15-1.15-.6-.15-.5.15-1 .6-1.15 3.55-1.05 9.4-.85 13.1 1.35.45.25.6.85.35 1.3-.25.35-.85.5-1.3.25zm-.1 2.8c-.25.35-.7.5-1.05.25-2.7-1.65-6.8-2.15-9.95-1.15-.4.1-.8-.1-.9-.5-.1-.4.1-.8.5-.9 3.65-1.1 8.15-.55 11.25 1.35.3.15.45.65.15 1zm-1.2 2.75c-.2.3-.55.4-.85.2-2.35-1.45-5.3-1.75-8.8-.95-.35.1-.65-.15-.75-.45-.1-.35.15-.65.45-.75 3.8-.85 7.1-.5 9.7 1.1.35.15.4.55.25.85z" fill="white"/></svg>`;
-    const logoPng = await svgToPngDataUrl(spotifySvg, 120, 120);
-    if (logoPng) {
-      doc.addImage(logoPng, 'PNG', pageW/2 - 12, 16, 24, 24);
-    }
+    // Helper for header styling on track list pages
+    const drawHeader = () => {
+      doc.setFillColor(248, 250, 252); doc.rect(0, 0, pageW, 24, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(29, 185, 84);
+      doc.text('Playlist Info Exporter', mL, 15);
+      
+      const plLabel = playlistData.name.slice(0, 32) + (playlistData.name.length > 32 ? '…' : '');
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 160);
+      const rightTextWidth = doc.getTextWidth(plLabel);
+      doc.text(plLabel, pageW - mL - rightTextWidth, 15);
 
-    doc.setFontSize(22); doc.setTextColor(255,255,255); doc.setFont('helvetica','bold');
-    doc.text(doc.splitTextToSize(playlistData?.name || 'Playlist', cW), pageW/2, 72, {align:'center'});
-    doc.setFont('helvetica','normal'); doc.setFontSize(11); doc.setTextColor(160,220,160);
-    doc.text(`by ${playlistData?.owner?.display_name || 'Unknown'}`, pageW/2, 84, {align:'center'});
-    doc.setFontSize(10); doc.setTextColor(130,130,180);
-    doc.text(`${allTracks.length} tracks`, pageW/2, 92, {align:'center'});
+      doc.setDrawColor(220, 224, 230); doc.setLineWidth(0.4);
+      doc.line(mL, 24, pageW - mL, 24);
+    };
 
-    // Draw Playlist Cover Image — large and centered
-    const coverUrl = playlistData.images?.[0]?.url;
-    if (coverUrl) {
-      const coverJpg = await getImageUrlAsJpeg(coverUrl, 800, 800);
-      if (coverJpg) {
-        const coverSize = 160; // 160mm × 160mm — fills the available space
-        // Available vertical space: y=98 to y=265 (167mm). Center of that = 181.5mm
-        const coverY = 98;
-        const coverX = pageW / 2 - coverSize / 2;
-        doc.addImage(coverJpg, 'JPEG', coverX, coverY, coverSize, coverSize);
+    // Helper for footer with interactive link
+    const drawFooter = (pageNum, totalPages) => {
+      doc.setDrawColor(220, 224, 230); doc.setLineWidth(0.2);
+      doc.line(mL, pageH - 16, pageW - mL, pageH - 16);
+
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(160, 160, 180);
+      doc.text(`Page ${pageNum} of ${totalPages}`, mL, pageH - 10);
+
+      const footnote = 'Note: AI language detection is search-based and may occasionally make mistakes.';
+      const fnW = doc.getTextWidth(footnote);
+      doc.text(footnote, pageW / 2 - fnW / 2, pageH - 13);
+
+      const ghLabel = 'GitHub: MindMatrix-07/Playlist-Exporter';
+      const ghLabelWidth = doc.getTextWidth(ghLabel);
+      doc.textWithLink(ghLabel, pageW - mL - ghLabelWidth, pageH - 10, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
+    };
+
+    const checkPage = (heightNeeded) => {
+      if (y + heightNeeded > (pageH - 20)) {
+        doc.addPage();
+        drawHeader();
+        y = 32;
       }
+    };
+
+    // ─── COVER PAGE ───────────────────────────────
+    // Dark aesthetic header stripe
+    doc.setFillColor(29, 185, 84); doc.rect(0, 0, pageW, 42, 'F');
+    
+    // Main Brand text in white
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(255, 255, 255);
+    doc.text('Playlist Info Exporter', mL, 22);
+
+    const subTitle = 'Generated PDF Playlist Booklet';
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(180, 240, 200);
+    doc.text(subTitle, mL, 29);
+
+    // Playlist Meta Box (centered)
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(20, 20, 40);
+    const plTitleLines = doc.splitTextToSize(playlistData.name, cW - 10);
+    doc.text(plTitleLines, pageW / 2, 60, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(100, 100, 120);
+    const plMetaText = `Created by: ${playlistData.owner?.display_name || 'Unknown'}  •  Total tracks: ${allTracks.length}`;
+    doc.text(plMetaText, pageW / 2, 72, { align: 'center' });
+
+    // Center & render Cover Artwork
+    if (coverJpg) {
+      const coverSize = 130; // Centered larger dimensions (uniform fit)
+      const coverY = 88;
+      const coverX = pageW / 2 - coverSize / 2;
+      doc.addImage(coverJpg, 'JPEG', coverX, coverY, coverSize, coverSize);
     }
 
-    doc.setFontSize(8.5); doc.setTextColor(29,185,84);
-    doc.text(playlistData?.external_urls?.spotify || '', pageW/2, pageH-30, {align:'center'});
-    doc.setFont('helvetica','italic'); doc.setFontSize(7); doc.setTextColor(140,140,150);
-    doc.text('Note: AI language detection is search-based and may occasionally make mistakes.', pageW/2, pageH-23, {align:'center'});
-    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(80,80,100);
-    doc.text('Generated with Playlist Info Exporter', pageW/2, pageH-16, {align:'center'});
-    doc.setFontSize(7.5); doc.setTextColor(100,100,140);
-    const ghLabel = '[ GitHub ]  github.com/MindMatrix-07/Playlist-Exporter';
-    const ghLabelWidth = doc.getTextWidth(ghLabel);
-    doc.textWithLink(ghLabel, pageW/2 - ghLabelWidth/2, pageH-9, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
+    // Cover Page Footer Link
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(29, 185, 84);
+    const linkUrl = playlistData.external_urls?.spotify || '';
+    const linkW = doc.getTextWidth(linkUrl);
+    doc.textWithLink(linkUrl, pageW / 2 - linkW / 2, 238, { url: linkUrl });
 
-    // Tracks
+    // Disclaimer and Repository footer
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.setTextColor(140, 140, 160);
+    const coverDisclaimer = 'Note: AI language detection is search-based and may occasionally make mistakes.';
+    const cdW = doc.getTextWidth(coverDisclaimer);
+    doc.text(coverDisclaimer, pageW/2 - cdW/2, 252);
+
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(80, 80, 100);
+    const ghLabel = 'Source Code on GitHub: MindMatrix-07/Playlist-Exporter';
+    const ghLabelWidth = doc.getTextWidth(ghLabel);
+    doc.textWithLink(ghLabel, pageW/2 - ghLabelWidth/2, 280, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
+
+    // ─── TRACKS PAGE ──────────────────────────────
     doc.addPage(); drawHeader(); y = 32;
     doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(20,20,40);
     doc.text('Track List', mL, y); y += 8;
@@ -654,119 +788,77 @@ async function exportToPDF() {
 
     y += 6; checkPage(14);
     doc.setFont('helvetica','italic'); doc.setFontSize(7.5); doc.setTextColor(160,160,180);
-    let footerNote = `Total: ${allTracks.length} tracks · Exported ${new Date().toLocaleDateString()} · Includes ISRC`;
-    if (isAiOn) {
-      footerNote += ` · Note: AI language detection may make mistakes.`;
-    }
-    doc.text(footerNote, mL, y);
-    y += 5;
-    doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(100,100,140);
-    doc.textWithLink('[ GitHub ]  github.com/MindMatrix-07/Playlist-Exporter', mL, y, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
+    const disclaimerBlock = doc.splitTextToSize('Disclaimer: The track info, links and ISRCs are retrieved from public Spotify indexes. AI language detection is search-based and is a best-effort prediction that may contain inaccuracies.', cW);
+    doc.text(disclaimerBlock, mL, y);
 
-    const safe = (playlistData?.name||'playlist').replace(/[^a-z0-9]/gi,'_').toLowerCase();
-    
-    // Manual blob download trigger to guarantee filename and extension (.pdf)
-    const blob = doc.output('blob');
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${safe}_tracklist.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    showToast('✓ PDF exported!');
-  } catch(err) {
-    console.error(err); showToast('PDF failed: ' + err.message);
+    // Apply footer numbers & links to all pages after rendering
+    const totalPages = doc.getNumberOfPages();
+    for (let pNum = 2; pNum <= totalPages; pNum++) {
+      doc.setPage(pNum);
+      drawFooter(pNum, totalPages);
+    }
+
+    const filename = (playlistData.name || 'playlist')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_tracklist.pdf';
+    doc.save(filename);
+    showToast('PDF booklet downloaded.');
+
+  } catch (err) {
+    console.error('PDF export failed:', err);
+    showToast('Export failed. Please check console.');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" style="width:16px;height:16px"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z" fill="currentColor"/></svg> Export PDF`;
+    setLoading(false);
+    if (pdfBtn)  pdfBtn.disabled = false;
+    if (copyBtn) copyBtn.disabled = false;
   }
 }
 
-// ─── Google AI Mode Helpers ───────────────────
+// ─── Google AI Mode Extension Handler ──────────
 
 let hasExtension = false;
 const pendingRequests = new Map();
 
 function checkExtensionPresence() {
-  const isNativeExt = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
-  const isPresent = isNativeExt || hasExtension;
+  const container = document.getElementById('aiModeInstallContainer');
   const toggleContainer = document.getElementById('aiModeContainer');
-  const installContainer = document.getElementById('aiModeInstallContainer');
-  
-  if (isPresent) {
+
+  if (hasExtension) {
+    if (container) container.style.display = 'none';
     if (toggleContainer) toggleContainer.style.display = 'block';
-    if (installContainer) installContainer.style.display = 'none';
   } else {
+    if (container) container.style.display = 'block';
     if (toggleContainer) toggleContainer.style.display = 'none';
-    if (installContainer) installContainer.style.display = 'block';
   }
 }
 
 function initAiToggleListener() {
   const cb = document.getElementById('aiModeCheckbox');
-  if (cb) {
-    cb.addEventListener('change', () => {
-      const pdfBtn = document.getElementById('pdfBtn');
-      const copyBtn = document.getElementById('copyBtn');
+  if (!cb) return;
 
-      if (cb.checked) {
-        // Clear languages and re-render
-        allTracks.forEach(t => t.language = '');
-        renderResults();
-        if (allTracks && allTracks.length > 0) {
-          startGoogleAiLanguageDetection();
-        }
-      } else {
-        aiDetectionInProgress = false;
-        allTracks.forEach(t => t.language = '');
-        renderResults();
-        if (pdfBtn) {
-          pdfBtn.disabled = false;
-          pdfBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" style="width:16px;height:16px"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z" fill="currentColor"/></svg> Export PDF`;
-        }
-        if (copyBtn) {
-          copyBtn.disabled = false;
-        }
-      }
-    });
-  }
+  cb.addEventListener('change', () => {
+    if (cb.checked && allTracks.length > 0 && !aiDetectionInProgress) {
+      startGoogleAiLanguageDetection();
+    } else if (!cb.checked) {
+      aiDetectionInProgress = false;
+    }
+  });
 }
 
 function askGoogleAiLang(song, artists) {
-  // Scenario A: Native Extension Tab context
-  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-    return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        { type: 'ASK_GOOGLE_AI_LANG', song, artists },
-        (res) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (res && res.ok) {
-            resolve(res.language);
-          } else {
-            reject(new Error(res?.error || 'AI Mode failed.'));
-          }
-        }
-      );
-    });
-  }
-
-  // Scenario B: Webpage context communicating via Page Connector content script
   return new Promise((resolve, reject) => {
     const key = `${song}||${artists}`;
-    pendingRequests.set(key, {
-      resolve,
-      reject,
-      timeout: setTimeout(() => {
-        pendingRequests.delete(key);
-        reject(new Error("Google AI took too long to respond."));
-      }, 25000)
-    });
+    const timeout = setTimeout(() => {
+      pendingRequests.delete(key);
+      reject(new Error('AI Request timed out.'));
+    }, 12000);
 
-    window.postMessage({ type: "FROM_PAGE_ASK_AI_LANG", song, artists }, "*");
+    pendingRequests.set(key, { resolve, reject, timeout });
+
+    window.postMessage({
+      type: "TO_EXT_AI_LANG_REQUEST",
+      song,
+      artists
+    }, "*");
   });
 }
 
@@ -776,27 +868,27 @@ async function startGoogleAiLanguageDetection() {
 
   const pdfBtn = document.getElementById('pdfBtn');
   const copyBtn = document.getElementById('copyBtn');
-  if (pdfBtn) pdfBtn.disabled = true;
-  if (copyBtn) copyBtn.disabled = true;
 
-  const tracksToScan = allTracks.map((t, idx) => ({ track: t, idx }));
-  const body = document.getElementById('tracksBody');
+  if (pdfBtn) {
+    pdfBtn.disabled = true;
+    pdfBtn.innerHTML = `<span class="spinner-ring" style="width:12px;height:12px;border-width:2px;margin:0"></span> Scanning Languages…`;
+  }
+  if (copyBtn) {
+    copyBtn.disabled = true;
+  }
 
-  for (const item of tracksToScan) {
+  showToast('⚡ Google AI Mode Active: Fetching track languages in background…');
+
+  for (let i = 0; i < allTracks.length; i++) {
     if (!aiDetectionInProgress) break;
 
-    const track = item.track;
-    const idx = item.idx;
-    const row = body ? body.children[idx] : null;
-    const badge = row ? row.querySelector('.col-lang .lang-badge') : null;
+    const track = allTracks[i];
+    if (track.language) continue; // Skip already fetched
 
-    if (pdfBtn) {
-      pdfBtn.innerHTML = `AI Detecting (${idx + 1} / ${tracksToScan.length})…`;
-    }
-
+    const badge = document.getElementById(`lang-badge-${i}`);
     if (badge) {
+      badge.textContent = 'Scanning…';
       badge.classList.add('scanning-text');
-      badge.textContent = '⚡ Scanning...';
     }
 
     try {
@@ -828,7 +920,7 @@ async function startGoogleAiLanguageDetection() {
 
   aiDetectionInProgress = false;
   
-  // Re-enable buttons if AI check is still enabled or if scanning finished
+  // Re-enable buttons
   const cb = document.getElementById('aiModeCheckbox');
   if (cb && cb.checked) {
     if (pdfBtn) {
@@ -874,7 +966,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   const el = document.getElementById('redirectUriDisplay');
   if (el) el.textContent = window.location.origin;
 
-  // Handle OAuth callback
+  // Load saved mode or fallback to premium
+  const savedMode = localStorage.getItem('sp_fetch_mode') || 'premium';
+  setFetchMode(savedMode);
+
+  // Handle OAuth callback if page has params
   await handleCallback();
 
   // Update UI based on auth state

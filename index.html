@@ -10,6 +10,51 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <link rel="stylesheet" href="style.css?v=2.0" />
+  <style>
+    /* Styling for the segmented control toggle */
+    .mode-selector-wrapper {
+      margin-bottom: 24px;
+      padding: 6px;
+      display: flex;
+      gap: 4px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .mode-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 10px;
+      border-radius: calc(var(--radius-sm) - 4px);
+      cursor: pointer;
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .mode-btn:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .mode-btn.active {
+      background: var(--green);
+      color: #ffffff;
+      box-shadow: 0 4px 15px rgba(29, 185, 84, 0.25);
+    }
+    .mode-badge {
+      font-size: 0.75rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      margin-left: 4px;
+    }
+  </style>
 </head>
 <body>
 
@@ -40,7 +85,27 @@
       </div>
     </header>
 
-    <!-- AUTH CARD (shown when not logged in) -->
+    <!-- FETCH MODE TOGGLE SELECTOR -->
+    <div class="mode-selector-wrapper glass-card">
+      <button id="modePremiumBtn" class="mode-btn active" onclick="setFetchMode('premium')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+        Spotify Premium Mode
+      </button>
+      <button id="modeWebBtn" class="mode-btn" onclick="setFetchMode('web')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.36 10.04L20.5 8.9c.2-.2.2-.5 0-.7l-1.4-1.4c-.2-.2-.5-.2-.7 0l-1.14 1.14c-1.14-.62-2.42-.94-3.76-.94-3.86 0-7 3.14-7 7s3.14 7 7 7c1.34 0 2.62-.32 3.76-.94l1.14 1.14c.2.2.5.2.7 0l1.4-1.4c.2-.2.2-.5 0-.7l-1.14-1.14c.62-1.14.94-2.42.94-3.76 0-1.34-.32-2.62-.94-3.76zm-5.86 5.46c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
+        Spotify Web Fetch
+      </button>
+    </div>
+
+    <!-- WEB FETCH INFO BOX -->
+    <div id="webFetchInfoBox" class="help-box" style="display:none; margin-bottom: 24px; background: rgba(29, 185, 84, 0.08); border-color: rgba(29, 185, 84, 0.25);">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/></svg>
+      <span>
+        🌐 <strong>Web Fetch Mode Active:</strong> Paste your public playlist URL directly below. No Client ID or authentication required.
+      </span>
+    </div>
+
+    <!-- AUTH CARD (shown when not logged in & in premium mode) -->
     <section class="setup-card glass-card" id="authCard">
       <div class="setup-title">
         <h1>Export Your Spotify Playlist</h1>
@@ -71,7 +136,7 @@
       <div class="error-box" id="errorBox" style="display:none;"></div>
     </section>
 
-    <!-- PLAYLIST CARD (shown when logged in) -->
+    <!-- PLAYLIST CARD (shown when logged in OR in web fetch mode) -->
     <section class="setup-card glass-card" id="playlistCard" style="display:none;">
       <div class="setup-title">
         <h1>Fetch a Playlist</h1>
@@ -154,6 +219,6 @@
   </div>
 
   <div class="toast" id="toast"></div>
-  <script src="app.js?v=2.9"></script>
+  <script src="app.js?v=3.0"></script>
 </body>
 </html>
