@@ -503,6 +503,154 @@ function copyToClipboard() {
     .catch(() => showToast('Failed to copy. Please copy manually.'));
 }
 
+function exportToHTML() {
+  if (!allTracks.length || !playlistData) return;
+
+  const htmlBtn = document.getElementById('htmlBtn');
+  if (htmlBtn) htmlBtn.disabled = true;
+
+  try {
+    const playlistName = playlistData.name || 'Playlist';
+    const playlistOwner = playlistData.owner?.display_name || 'Unknown';
+    const playlistUrl = playlistData.external_urls?.spotify || '';
+    const playlistImage = playlistData.images?.[0]?.url || '';
+    const exportedAt = new Date().toLocaleString();
+    const safeName = makeSafeFilename(playlistName);
+    const storageKey = `playlist-checklist:${safeName}:${allTracks.length}`;
+
+    const rows = allTracks.map((track, index) => {
+      const language = track.language || detectLanguage(track.name, track.isrc);
+      const trackKey = getTrackKey(track, index);
+      return `
+        <tr>
+          <td class="num">${index + 1}</td>
+          <td class="song">
+            ${track.albumArt ? `<img src="${escAttr(track.albumArt)}" alt="">` : '<span class="art-placeholder"></span>'}
+            <div>
+              <strong>${escHtml(track.name)}</strong>
+              <span>${escHtml(track.album || '')}</span>
+            </div>
+          </td>
+          <td>${escHtml(track.artists)}</td>
+          <td><code>${escHtml(track.isrc || '-')}</code></td>
+          <td>${escHtml(language)}</td>
+          <td><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
+          <td class="done-cell"><input type="checkbox" data-track-key="${escAttr(trackKey)}" aria-label="Mark ${escAttr(track.name)} done"></td>
+        </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escHtml(playlistName)} Checklist</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; --green:#1db954; --ink:#101828; --muted:#667085; --line:#e4e7ec; --soft:#f8fafc; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: #f3f6f8; }
+    header { background: #0a0a14; color: white; padding: 28px 32px; border-top: 12px solid var(--green); }
+    .head { max-width: 1180px; margin: 0 auto; display: flex; gap: 20px; align-items: center; }
+    .cover { width: 86px; height: 86px; border-radius: 8px; object-fit: cover; background: #202436; }
+    h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.15; }
+    .meta { margin: 0; color: #b8c0d4; font-size: 14px; }
+    main { max-width: 1180px; margin: 24px auto 48px; padding: 0 18px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .toolbar p { margin: 0; color: var(--muted); font-size: 14px; }
+    .clear { border: 1px solid var(--line); background: white; border-radius: 7px; padding: 9px 12px; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; background: white; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 12px 32px rgba(16,24,40,.08); }
+    th { background: var(--green); color: white; text-align: left; font-size: 13px; padding: 11px 10px; }
+    td { border-top: 1px solid var(--line); padding: 10px; vertical-align: middle; font-size: 14px; }
+    tr.done { background: #f0fdf4; }
+    tr.done .song strong { text-decoration: line-through; color: var(--muted); }
+    .num { width: 42px; color: var(--muted); }
+    .song { display: flex; gap: 10px; align-items: center; min-width: 280px; }
+    .song img, .art-placeholder { width: 44px; height: 44px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; background: #e4e7ec; }
+    .song strong { display: block; margin-bottom: 4px; }
+    .song span { color: var(--muted); font-size: 12px; }
+    code { color: #00897b; font-weight: 700; font-family: inherit; }
+    .open-link { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 32px; border: 1px solid var(--green); color: #087f3f; border-radius: 7px; text-decoration: none; font-weight: 700; }
+    .done-cell { text-align: center; width: 64px; }
+    input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--green); cursor: pointer; }
+    @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5) { display:none; } .head { align-items:flex-start; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="head">
+      ${playlistImage ? `<img class="cover" src="${escAttr(playlistImage)}" alt="">` : '<div class="cover"></div>'}
+      <div>
+        <h1>${escHtml(playlistName)}</h1>
+        <p class="meta">By ${escHtml(playlistOwner)} · ${allTracks.length} tracks · Exported ${escHtml(exportedAt)}${playlistUrl ? ` · <a href="${escAttr(playlistUrl)}" target="_blank" rel="noopener" style="color:#7df0a2">Open playlist</a>` : ''}</p>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="toolbar">
+      <p>Done ticks are saved in this browser for this HTML checklist.</p>
+      <button class="clear" id="clearDone">Clear Done</button>
+    </div>
+    <table>
+      <thead><tr><th>#</th><th>Song</th><th>Artists</th><th>ISRC</th><th>Language</th><th>Spotify</th><th>Done</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </main>
+  <script>
+    const storageKey = ${JSON.stringify(storageKey)};
+    const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    const boxes = document.querySelectorAll('input[type="checkbox"][data-track-key]');
+    function syncRow(box) { box.closest('tr').classList.toggle('done', box.checked); }
+    boxes.forEach(box => {
+      box.checked = saved[box.dataset.trackKey] === true;
+      syncRow(box);
+      box.addEventListener('change', () => {
+        saved[box.dataset.trackKey] = box.checked;
+        localStorage.setItem(storageKey, JSON.stringify(saved));
+        syncRow(box);
+      });
+    });
+    document.getElementById('clearDone').addEventListener('click', () => {
+      boxes.forEach(box => { box.checked = false; saved[box.dataset.trackKey] = false; syncRow(box); });
+      localStorage.setItem(storageKey, JSON.stringify(saved));
+    });
+  </script>
+</body>
+</html>`;
+
+    downloadTextFile(`${safeName}_checklist.html`, html, 'text/html');
+    showToast('HTML checklist downloaded.');
+  } catch (err) {
+    console.error('HTML export failed:', err);
+    showToast('HTML export failed. Please check console.');
+  } finally {
+    if (htmlBtn) htmlBtn.disabled = false;
+  }
+}
+
+function downloadTextFile(filename, text, type) {
+  const blob = new Blob([text], { type: `${type};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function makeSafeFilename(value) {
+  return String(value || 'playlist').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'playlist';
+}
+
+function getTrackKey(track, index) {
+  return track.url || `${index + 1}:${track.name}:${track.artists}`;
+}
+
+function escAttr(str) {
+  return escHtml(String(str || '')).replace(/'/g, '&#39;');
+}
+
 // ─── Image Downloader (Cover Art Base64) ─────
 
 async function svgToPngDataUrl(svgString, width = 120, height = 120) {
