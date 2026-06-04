@@ -258,6 +258,7 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
         name:    t.name    || 'Unknown',
         artists: (t.artists || []).map(a => a.name).join(', '),
         album:   t.album?.name || '',
+        albumArt: t.album?.images?.[t.album.images.length - 1]?.url || t.album?.images?.[0]?.url || '',
         url:     t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
         isrc:    isrc,
         language: ''
@@ -521,30 +522,32 @@ async function exportToPDF() {
     const aiModeCheckbox = document.getElementById('aiModeCheckbox');
     const isAiOn = aiModeCheckbox && aiModeCheckbox.checked;
 
+    const thumbSize = 9; // mm — album art thumbnail square
+
     let cN, cS, cA, cI, cLa, cLn;
     let songWrapWidth, albumWrapWidth, artistWrapWidth, langWrapWidth;
 
     if (isAiOn) {
       cN = mL;
-      cS = mL + 10;
-      cA = mL + 62;
-      cI = mL + 106;
-      cLa = mL + 134;
-      cLn = mL + 160;
-      songWrapWidth = 50;
-      albumWrapWidth = 50;
-      artistWrapWidth = 42;
-      langWrapWidth = 24;
+      cS = mL + 18;        // shifted right: #(4) + thumb(9) + gap(5)
+      cA = mL + 70;
+      cI = mL + 110;
+      cLa = mL + 138;
+      cLn = mL + 162;
+      songWrapWidth = 46;
+      albumWrapWidth = 46;
+      artistWrapWidth = 38;
+      langWrapWidth = 22;
     } else {
       cN = mL;
-      cS = mL + 10;
-      cA = mL + 72;
-      cI = mL + 124;
+      cS = mL + 18;
+      cA = mL + 80;
+      cI = mL + 130;
       cLa = null;
-      cLn = mL + 156;
-      songWrapWidth = 60;
-      albumWrapWidth = 60;
-      artistWrapWidth = 50;
+      cLn = mL + 158;
+      songWrapWidth = 56;
+      albumWrapWidth = 56;
+      artistWrapWidth = 46;
       langWrapWidth = 0;
     }
 
@@ -558,7 +561,14 @@ async function exportToPDF() {
     doc.text('Spotify',cLn,y+5.5);
     y += 10;
 
-    allTracks.forEach((track, i) => {
+    // Pre-fetch all album art thumbnails in parallel
+    const thumbDataUrls = await Promise.all(
+      allTracks.map(track => track.albumArt ? getImageUrlAsJpeg(track.albumArt, 80, 80) : Promise.resolve(null))
+    );
+
+    for (let i = 0; i < allTracks.length; i++) {
+      const track = allTracks[i];
+      const thumbData = thumbDataUrls[i];
       // Split text to fit columns for multi-line wrapping
       doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
       const songLines = doc.splitTextToSize(track.name, songWrapWidth);
@@ -572,11 +582,11 @@ async function exportToPDF() {
         langLines = doc.splitTextToSize(track.language || 'English', langWrapWidth);
       }
 
-      // Calculate row height dynamically
+      // Calculate row height dynamically (min 11mm to always fit thumbnail)
       const songH = songLines.length * 3.2 + 3.5;
       const artistH = artistLines.length * 3.0 + 3.5;
       const langH = isAiOn ? (langLines.length * 2.8 + 3.5) : 0;
-      const rH = Math.max(12, songH, artistH, langH);
+      const rH = Math.max(thumbSize + 2, songH, artistH, langH);
 
       checkPage(rH + 2);
 
@@ -589,6 +599,16 @@ async function exportToPDF() {
       // Draw index
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(140, 140, 160);
       doc.text(String(i + 1), cN, y + 5.5);
+
+      // Draw album art thumbnail
+      const thumbX = mL + 5;
+      const thumbY = y + (rH - thumbSize) / 2;
+      if (thumbData) {
+        doc.addImage(thumbData, 'JPEG', thumbX, thumbY, thumbSize, thumbSize);
+      } else {
+        doc.setFillColor(220, 220, 230);
+        doc.rect(thumbX, thumbY, thumbSize, thumbSize, 'F');
+      }
 
       // Draw Song Lines
       let songY = y + 5.0;
@@ -623,14 +643,14 @@ async function exportToPDF() {
       // Draw Spotify link (centered vertically in row)
       doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(29, 185, 84);
       const tid = track.url.replace('https://open.spotify.com/track/', '').slice(0, 12);
-      doc.textWithLink(tid + '…', cLn, y + (rH / 2) + 1, { url: track.url });
+      doc.textWithLink(tid + '\u2026', cLn, y + (rH / 2) + 1, { url: track.url });
 
       // Draw cell separator line
       doc.setDrawColor(225, 228, 240); doc.setLineWidth(0.2);
       doc.line(mL, y + rH - 1, mL + cW, y + rH - 1);
 
       y += rH;
-    });
+    }
 
     y += 6; checkPage(14);
     doc.setFont('helvetica','italic'); doc.setFontSize(7.5); doc.setTextColor(160,160,180);
