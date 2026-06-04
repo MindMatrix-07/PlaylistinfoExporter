@@ -527,10 +527,10 @@ function exportToHTML() {
         <tr>
           <td class="num">${index + 1}</td>
           <td class="song">
-            ${track.albumArt ? `<img src="${escAttr(track.albumArt)}" alt="">` : '<span class="art-placeholder"></span>'}
+            ${track.albumArt ? `<img class="no-copy" src="${escAttr(track.albumArt)}" alt="" draggable="false">` : '<span class="art-placeholder no-copy"></span>'}
             <div>
               <strong>${escHtml(track.name)}</strong>
-              <span>${escHtml(track.album || '')}</span>
+              <span class="album-name no-copy">${escHtml(track.album || '')}</span>
             </div>
           </td>
           <td>${escHtml(track.artists)}</td>
@@ -579,6 +579,8 @@ function exportToHTML() {
     .open-link { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 32px; border: 1px solid var(--green); color: #087f3f; border-radius: 7px; text-decoration: none; font-weight: 700; }
     .done-cell { text-align: center; width: 64px; }
     input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--green); cursor: pointer; }
+    .no-copy, .num, .album-name, .spotify-mark, .spotify-mark img { -webkit-user-select: none; user-select: none; -webkit-user-drag: none; }
+    .num, .album-name { pointer-events: none; }
     .site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 18px 36px; }
     .site-footer a { color: var(--green); font-weight: 700; text-decoration: none; margin: 0 8px; }
     @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5) { display:none; } .head { grid-template-columns: auto 1fr; align-items:flex-start; } .spotify-mark { display:none; } }
@@ -593,7 +595,7 @@ function exportToHTML() {
         <p class="meta">By ${escHtml(playlistOwner)} · ${allTracks.length} tracks · Exported ${escHtml(exportedAt)}${playlistUrl ? ` · <a href="${escAttr(playlistUrl)}" target="_blank" rel="noopener" style="color:#7df0a2">Open playlist</a>` : ''}</p>
       </div>
       <div class="spotify-mark">
-        <img src="${escAttr(spotifyLogoUrl)}" alt="Spotify">
+        <img class="no-copy" src="${escAttr(spotifyLogoUrl)}" alt="Spotify" draggable="false">
       </div>
     </div>
   </header>
@@ -642,6 +644,10 @@ function exportToHTML() {
     const embeddedState = readEmbeddedJson(embeddedDone, {});
     const saved = Object.assign({}, embeddedState, JSON.parse(localStorage.getItem(storageKey) || '{}'));
     const boxes = document.querySelectorAll('input[type="checkbox"][data-track-key]');
+    document.querySelectorAll('img.no-copy').forEach(img => {
+      img.addEventListener('contextmenu', event => event.preventDefault());
+      img.addEventListener('dragstart', event => event.preventDefault());
+    });
     function syncRow(box) { box.closest('tr').classList.toggle('done', box.checked); }
     function currentDoneState() {
       const state = {};
