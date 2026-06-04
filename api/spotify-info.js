@@ -144,24 +144,22 @@ async function fetchIsrcsAndAlbumArt(token, trackIds) {
 
   const results = {};
   for (const chunk of chunks) {
-    try {
-      const resp = await fetch(`https://api.spotify.com/v1/tracks?ids=${chunk.join(',')}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        (data.tracks || []).forEach(t => {
-          if (t && t.id) {
-            results[t.id] = {
-              isrc: t.external_ids?.isrc || '—',
-              albumArt: t.album?.images?.[t.album.images.length - 1]?.url || t.album?.images?.[0]?.url || ''
-            };
-          }
-        });
-      }
-    } catch (e) {
-      console.error('Error fetching chunk details from Spotify:', e.message);
+    const resp = await fetch(`https://api.spotify.com/v1/tracks?ids=${chunk.join(',')}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => '');
+      throw new Error(`Spotify API tracks lookup failed (HTTP ${resp.status}): ${errText}`);
     }
+    const data = await resp.json();
+    (data.tracks || []).forEach(t => {
+      if (t && t.id) {
+        results[t.id] = {
+          isrc: t.external_ids?.isrc || '—',
+          albumArt: t.album?.images?.[t.album.images.length - 1]?.url || t.album?.images?.[0]?.url || ''
+        };
+      }
+    });
   }
   return results;
 }
