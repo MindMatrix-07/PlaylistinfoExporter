@@ -230,6 +230,18 @@ function showError(msg, boxId = 'errorBox') {
   box.style.display = 'flex';
 }
 
+function showSpotifyApiError(err, rawUrl) {
+  const details = formatSpotifyErrorDetails(err);
+  const fallbackUrl = makeModeUrl(RENDER_ORIGIN, 'web', 'web-fetch', rawUrl);
+  showError(`
+    <div>
+      <div><strong>Spotify API error:</strong> ${escHtml(err.message || 'Unknown error')}</div>
+      ${details ? `<pre style="margin:10px 0 0;white-space:pre-wrap;font:12px/1.45 Consolas,monospace;color:#fecaca;">${escHtml(details)}</pre>` : ''}
+      <a href="${escAttr(fallbackUrl)}" style="display:inline-flex;margin-top:10px;color:#fca5a5;font-weight:700;">Open with Render Web Fetch</a>
+    </div>
+  `, 'errorBox2');
+}
+
 function hideError(boxId = 'errorBox2') {
   const box = document.getElementById(boxId);
   if (box) box.style.display = 'none';
@@ -278,6 +290,7 @@ async function fetchPlaylistMeta(token, playlistId) {
     const errMsg = errBody?.error?.message || `HTTP ${resp.status}`;
     const error = new Error(`Failed to load playlist metadata: ${errMsg} (${resp.status})`);
     error.status = resp.status;
+    error.spotifyResponse = errBody;
     throw error;
   }
   return resp.json();
@@ -298,6 +311,7 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
       const errMsg = errBody?.error?.message || `HTTP ${resp.status}`;
       const error = new Error(`Failed to fetch tracks: ${errMsg} (${resp.status})`);
       error.status = resp.status;
+      error.spotifyResponse = errBody;
       throw error;
     }
     const data = await resp.json();
@@ -430,8 +444,7 @@ async function fetchPlaylist() {
     } catch (err) {
       setLoading(false);
       if (isSpotifyForbiddenError(err)) {
-        showToast('Spotify blocked Premium mode. Opening Web Fetch on Render...');
-        window.location.href = makeModeUrl(RENDER_ORIGIN, 'web', 'web-fetch', rawUrl);
+        showSpotifyApiError(err, rawUrl);
         return;
       }
       showError(err.message || 'Something went wrong.', 'errorBox2');
@@ -554,6 +567,12 @@ function getRequestedPlaylistUrl() {
 
 function isSpotifyForbiddenError(err) {
   return err?.status === 403 || /\bForbidden \(403\)/i.test(err?.message || '');
+}
+
+function formatSpotifyErrorDetails(err) {
+  const body = err?.spotifyResponse;
+  if (!body || !Object.keys(body).length) return '';
+  return JSON.stringify(body, null, 2);
 }
 
 function exportToHTML() {
