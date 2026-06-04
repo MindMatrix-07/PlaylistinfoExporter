@@ -811,9 +811,9 @@ async function exportToPDF() {
       const fnW = doc.getTextWidth(footnote);
       doc.text(footnote, pageW / 2 - fnW / 2, pageH - 13);
 
-      const ghLabel = 'GitHub: MindMatrix-07/Playlist-Exporter';
+      const ghLabel = 'GitHub: MindMatrix-07/PlaylistinfoExporter';
       const ghLabelWidth = doc.getTextWidth(ghLabel);
-      doc.textWithLink(ghLabel, pageW - mL - ghLabelWidth, pageH - 10, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
+      doc.textWithLink(ghLabel, pageW - mL - ghLabelWidth, pageH - 10, { url: 'https://github.com/MindMatrix-07/PlaylistinfoExporter' });
     };
 
     const checkPage = (heightNeeded) => {
@@ -856,9 +856,9 @@ async function exportToPDF() {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(80, 80, 100);
     doc.text('Generated with Playlist Info Exporter', pageW / 2, pageH - 16, { align: 'center' });
     doc.setFontSize(7.5); doc.setTextColor(100, 100, 140);
-    const ghLabel = '[ GitHub ]  github.com/MindMatrix-07/Playlist-Exporter';
+    const ghLabel = '[ GitHub ]  github.com/MindMatrix-07/PlaylistinfoExporter';
     const ghLabelWidth = doc.getTextWidth(ghLabel);
-    doc.textWithLink(ghLabel, pageW / 2 - ghLabelWidth / 2, pageH - 9, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
+    doc.textWithLink(ghLabel, pageW / 2 - ghLabelWidth / 2, pageH - 9, { url: 'https://github.com/MindMatrix-07/PlaylistinfoExporter' });
 
     // ─── TRACKS PAGE ──────────────────────────────
     doc.addPage(); drawHeader(); y = 32;

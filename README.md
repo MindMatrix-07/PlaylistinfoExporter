@@ -26,7 +26,7 @@ Just open `index.html` in any browser — no build step required.
 
 Click below or connect this repo on [vercel.com](https://vercel.com):
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/MindMatrix-07/Playlist-Exporter)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/MindMatrix-07/PlaylistinfoExporter)
 
 ## 📦 Tech Stack
 
