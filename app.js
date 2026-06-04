@@ -519,9 +519,10 @@ function exportToHTML() {
     const storageKey = `playlist-checklist:${safeName}:${allTracks.length}`;
     const htmlFileName = `${safeName}_checklist.html`;
     const spotifyLogoUrl = new URL('Spotify_Primary_Logo_RGB_White.png', window.location.href).href;
+    const aiModeCheckbox = document.getElementById('aiModeCheckbox');
+    const includeLanguageColumn = Boolean(aiModeCheckbox?.checked && allTracks.some(track => track.language));
 
     const rows = allTracks.map((track, index) => {
-      const language = track.language || detectLanguage(track.name, track.isrc);
       const trackKey = getTrackKey(track, index);
       return `
         <tr>
@@ -535,7 +536,7 @@ function exportToHTML() {
           </td>
           <td>${escHtml(track.artists)}</td>
           <td><code>${escHtml(track.isrc || '-')}</code></td>
-          <td>${escHtml(language)}</td>
+          ${includeLanguageColumn ? `<td>${escHtml(track.language || '')}</td>` : ''}
           <td><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
           <td class="done-cell"><input type="checkbox" data-track-key="${escAttr(trackKey)}" aria-label="Mark ${escAttr(track.name)} done"></td>
         </tr>`;
@@ -583,7 +584,7 @@ function exportToHTML() {
     .num, .album-name { pointer-events: none; }
     .site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 18px 36px; }
     .site-footer a { color: var(--green); font-weight: 700; text-decoration: none; margin: 0 8px; }
-    @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4), th:nth-child(5), td:nth-child(5) { display:none; } .head { grid-template-columns: auto 1fr; align-items:flex-start; } .spotify-mark { display:none; } }
+    @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4) { display:none; } ${includeLanguageColumn ? 'th:nth-child(5), td:nth-child(5) { display:none; }' : ''} .head { grid-template-columns: auto 1fr; align-items:flex-start; } .spotify-mark { display:none; } }
   </style>
 </head>
 <body>
@@ -609,7 +610,7 @@ function exportToHTML() {
       </div>
     </div>
     <table>
-      <thead><tr><th>#</th><th>Song</th><th>Artists</th><th>ISRC</th><th>Language</th><th>Spotify</th><th>Done</th></tr></thead>
+      <thead><tr><th>#</th><th>Song</th><th>Artists</th><th>ISRC</th>${includeLanguageColumn ? '<th>Language</th>' : ''}<th>Spotify</th><th>Done</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </main>
