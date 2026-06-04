@@ -505,6 +505,22 @@ function copyToClipboard() {
 
 // ─── Image Downloader (Cover Art Base64) ─────
 
+async function svgToPngDataUrl(svgString, width = 120, height = 120) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgString)));
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(null);
+  });
+}
+
 async function getImageUrlAsJpeg(url, maxW, maxH) {
   return new Promise((resolve) => {
     const img = new Image();
@@ -603,50 +619,40 @@ async function exportToPDF() {
     };
 
     // ─── COVER PAGE ───────────────────────────────
-    // Dark aesthetic header stripe
-    doc.setFillColor(29, 185, 84); doc.rect(0, 0, pageW, 42, 'F');
-    
-    // Main Brand text in white
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(255, 255, 255);
-    doc.text('Playlist Info Exporter', mL, 22);
+    doc.setFillColor(10, 10, 20); doc.rect(0, 0, pageW, pageH, 'F');
+    doc.setFillColor(29, 185, 84); doc.rect(0, 0, pageW, 55, 'F');
+    doc.setFillColor(0, 0, 0); doc.circle(pageW / 2, 28, 18, 'F');
 
-    const subTitle = 'Generated PDF Playlist Booklet';
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(180, 240, 200);
-    doc.text(subTitle, mL, 29);
+    const spotifySvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#1DB954"/><path d="M17.9 10.9C14.7 9 9.35 8.8 6.3 9.75c-.5.15-1-.15-1.15-.6-.15-.5.15-1 .6-1.15 3.55-1.05 9.4-.85 13.1 1.35.45.25.6.85.35 1.3-.25.35-.85.5-1.3.25zm-.1 2.8c-.25.35-.7.5-1.05.25-2.7-1.65-6.8-2.15-9.95-1.15-.4.1-.8-.1-.9-.5-.1-.4.1-.8.5-.9 3.65-1.1 8.15-.55 11.25 1.35.3.15.45.65.15 1zm-1.2 2.75c-.2.3-.55.4-.85.2-2.35-1.45-5.3-1.75-8.8-.95-.35.1-.65-.15-.75-.45-.1-.35.15-.65.45-.75 3.8-.85 7.1-.5 9.7 1.1.35.15.4.55.25.85z" fill="white"/></svg>`;
+    const logoPng = await svgToPngDataUrl(spotifySvg, 120, 120);
+    if (logoPng) {
+      doc.addImage(logoPng, 'PNG', pageW / 2 - 12, 16, 24, 24);
+    }
 
-    // Playlist Meta Box (centered)
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(20, 20, 40);
-    const plTitleLines = doc.splitTextToSize(playlistData.name, cW - 10);
-    doc.text(plTitleLines, pageW / 2, 60, { align: 'center' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(22); doc.setTextColor(255, 255, 255);
+    doc.text(doc.splitTextToSize(playlistData?.name || 'Playlist', cW), pageW / 2, 72, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(160, 220, 160);
+    doc.text(`by ${playlistData?.owner?.display_name || 'Unknown'}`, pageW / 2, 84, { align: 'center' });
+    doc.setFontSize(10); doc.setTextColor(130, 130, 180);
+    doc.text(`${allTracks.length} tracks`, pageW / 2, 92, { align: 'center' });
 
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(100, 100, 120);
-    const plMetaText = `Created by: ${playlistData.owner?.display_name || 'Unknown'}  •  Total tracks: ${allTracks.length}`;
-    doc.text(plMetaText, pageW / 2, 72, { align: 'center' });
-
-    // Center & render Cover Artwork
     if (coverJpg) {
-      const coverSize = 130; // Centered larger dimensions (uniform fit)
-      const coverY = 88;
+      const coverSize = 160;
+      const coverY = 98;
       const coverX = pageW / 2 - coverSize / 2;
       doc.addImage(coverJpg, 'JPEG', coverX, coverY, coverSize, coverSize);
     }
 
-    // Cover Page Footer Link
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(29, 185, 84);
-    const linkUrl = playlistData.external_urls?.spotify || '';
-    const linkW = doc.getTextWidth(linkUrl);
-    doc.textWithLink(linkUrl, pageW / 2 - linkW / 2, 238, { url: linkUrl });
-
-    // Disclaimer and Repository footer
-    doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.setTextColor(140, 140, 160);
-    const coverDisclaimer = 'Note: AI language detection is search-based and may occasionally make mistakes.';
-    const cdW = doc.getTextWidth(coverDisclaimer);
-    doc.text(coverDisclaimer, pageW/2 - cdW/2, 252);
-
+    doc.setFontSize(8.5); doc.setTextColor(29, 185, 84);
+    doc.text(playlistData?.external_urls?.spotify || '', pageW / 2, pageH - 30, { align: 'center' });
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(140, 140, 150);
+    doc.text('Note: AI language detection is search-based and may occasionally make mistakes.', pageW / 2, pageH - 23, { align: 'center' });
     doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(80, 80, 100);
-    const ghLabel = 'Source Code on GitHub: MindMatrix-07/Playlist-Exporter';
+    doc.text('Generated with Playlist Info Exporter', pageW / 2, pageH - 16, { align: 'center' });
+    doc.setFontSize(7.5); doc.setTextColor(100, 100, 140);
+    const ghLabel = '[ GitHub ]  github.com/MindMatrix-07/Playlist-Exporter';
     const ghLabelWidth = doc.getTextWidth(ghLabel);
-    doc.textWithLink(ghLabel, pageW/2 - ghLabelWidth/2, 280, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
+    doc.textWithLink(ghLabel, pageW / 2 - ghLabelWidth / 2, pageH - 9, { url: 'https://github.com/MindMatrix-07/Playlist-Exporter' });
 
     // ─── TRACKS PAGE ──────────────────────────────
     doc.addPage(); drawHeader(); y = 32;
