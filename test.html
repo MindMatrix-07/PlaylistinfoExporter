@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Playlist Info Exporter (Test Lab)</title>
+  <meta name="description" content="Export any Spotify playlist to PDF with song names, artists, ISRC and links." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css?v=2.0" />
+  <style>
+    /* Styling for the segmented control toggle */
+    .mode-selector-wrapper {
+      margin-bottom: 24px;
+      padding: 6px;
+      display: flex;
+      gap: 4px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .mode-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 10px;
+      border-radius: calc(var(--radius-sm) - 4px);
+      cursor: pointer;
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .mode-btn:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .mode-btn.active {
+      background: var(--green);
+      color: #ffffff;
+      box-shadow: 0 4px 15px rgba(29, 185, 84, 0.25);
+    }
+    .mode-badge {
+      font-size: 0.75rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      margin-left: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="bg-orb orb1"></div>
+  <div class="bg-orb orb2"></div>
+  <div class="bg-orb orb3"></div>
+
+  <div class="app-wrapper">
+
+    <header class="header">
+      <div class="logo">
+        <svg class="spotify-icon" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="12" fill="#1DB954"/>
+          <path d="M17.9 10.9C14.7 9 9.35 8.8 6.3 9.75c-.5.15-1-.15-1.15-.6-.15-.5.15-1 .6-1.15 3.55-1.05 9.4-.85 13.1 1.35.45.25.6.85.35 1.3-.25.35-.85.5-1.3.25zm-.1 2.8c-.25.35-.7.5-1.05.25-2.7-1.65-6.8-2.15-9.95-1.15-.4.1-.8-.1-.9-.5-.1-.4.1-.8.5-.9 3.65-1.1 8.15-.55 11.25 1.35.3.15.45.65.15 1zm-1.2 2.75c-.2.3-.55.4-.85.2-2.35-1.45-5.3-1.75-8.8-.95-.35.1-.65-.15-.75-.45-.1-.35.15-.65.45-.75 3.8-.85 7.1-.5 9.7 1.1.35.15.4.55.25.85z" fill="white"/>
+        </svg>
+        <span class="logo-text">Playlist Info <span class="accent">Exporter</span> <span class="mode-badge" style="background: var(--accent); color: var(--bg); font-weight: bold; border-radius: 6px; font-size: 0.7rem; padding: 2px 8px; vertical-align: middle;">TEST LAB</span></span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <a href="https://github.com/MindMatrix-07/Playlist-Exporter" target="_blank" class="github-link" title="View Source on GitHub" style="display: flex; align-items: center;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); transition: color 0.2s;"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+        </a>
+        <div id="connectedStatus" class="connected-status" style="display:none;">
+          <span class="connected-dot"></span>
+          <span id="connectedName">Connected</span>
+          <button class="btn-disconnect" onclick="disconnectSpotify()">Disconnect</button>
+        </div>
+        <div id="notConnectedBadge" class="header-badge">PDF Export</div>
+      </div>
+    </header>
+
+    <!-- FETCH MODE TOGGLE SELECTOR -->
+    <div class="mode-selector-wrapper glass-card">
+      <button id="modePremiumBtn" class="mode-btn active" onclick="setFetchMode('premium')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H7c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.04-.42 1.99-1.07 2.75z"/></svg>
+        Spotify Premium Mode
+      </button>
+      <button id="modeWebBtn" class="mode-btn" onclick="setFetchMode('web')">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19.36 10.04L20.5 8.9c.2-.2.2-.5 0-.7l-1.4-1.4c-.2-.2-.5-.2-.7 0l-1.14 1.14c-1.14-.62-2.42-.94-3.76-.94-3.86 0-7 3.14-7 7s3.14 7 7 7c1.34 0 2.62-.32 3.76-.94l1.14 1.14c.2.2.5.2.7 0l1.4-1.4c.2-.2.2-.5 0-.7l-1.14-1.14c.62-1.14.94-2.42.94-3.76 0-1.34-.32-2.62-.94-3.76zm-5.86 5.46c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"/></svg>
+        Spotify Web Fetch
+      </button>
+    </div>
+
+    <!-- WEB FETCH INFO BOX -->
+    <div id="webFetchInfoBox" class="help-box" style="display:none; margin-bottom: 24px; background: rgba(29, 185, 84, 0.08); border-color: rgba(29, 185, 84, 0.25);">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/></svg>
+      <span>
+        🌐 <strong>Web Fetch Mode Active:</strong> Paste your public playlist URL directly below. No Client ID or authentication required.
+      </span>
+    </div>
+
+    <!-- AUTH CARD (shown when not logged in & in premium mode) -->
+    <section class="setup-card glass-card" id="authCard">
+      <div class="setup-title">
+        <h1>Export Your Spotify Playlist</h1>
+        <p>Connect your Spotify account to fetch any public playlist and export it as a beautiful PDF with ISRC codes.</p>
+      </div>
+
+      <div class="input-group full-width" style="margin-bottom:16px;">
+        <label for="clientId">Client ID</label>
+        <div class="input-wrapper">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C9.24 2 7 4.24 7 7s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zm0 12c-5.33 0-8 2.67-8 4v2h16v-2c0-1.33-2.67-4-8-4z" fill="currentColor"/></svg>
+          <input type="text" id="clientId" placeholder="Spotify Client ID" autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="help-box">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/></svg>
+        <span>
+          Get your Client ID at <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com/dashboard</a>. Set Redirect URI to <strong id="redirectUriDisplay"></strong> in your app settings &middot;
+          <a href="spotify_guide.html" target="_blank" style="color: var(--accent); font-weight: bold; text-decoration: underline; margin-left: 2px;">Setup Guide</a>
+        </span>
+      </div>
+
+      <button class="btn-fetch" id="connectBtn" onclick="connectSpotify()">
+        <span class="btn-text">Connect with Spotify</span>
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+
+      <div class="error-box" id="errorBox" style="display:none;"></div>
+    </section>
+
+    <!-- PLAYLIST CARD (shown when logged in OR in web fetch mode) -->
+    <section class="setup-card glass-card" id="playlistCard" style="display:none;">
+      <div class="setup-title">
+        <h1>Fetch a Playlist</h1>
+        <p>Paste any public Spotify playlist URL or URI below.</p>
+      </div>
+
+      <div class="input-group full-width" style="margin-bottom:24px;">
+        <label for="playlistUrl">Playlist URL or URI</label>
+        <div class="input-wrapper">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z" fill="currentColor"/></svg>
+          <input type="text" id="playlistUrl" placeholder="https://open.spotify.com/playlist/..." />
+        </div>
+      </div>
+
+      <div class="ai-mode-install-container" id="aiModeInstallContainer" style="display:none; margin-bottom:24px;">
+        <div class="help-box" style="background: rgba(124, 58, 237, 0.08); border-color: rgba(124, 58, 237, 0.25);">
+          <svg viewBox="0 0 24 24" fill="none" style="color: var(--accent);"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z" fill="currentColor"/></svg>
+          <span style="font-size: 0.85rem; line-height: 1.4;">
+            ⚡ <strong>Unlock Google AI Mode:</strong> Automatically search & retrieve track languages via Google.
+            <a href="spotify-playlist-exporter.zip" download="spotify-playlist-exporter.zip" style="color: var(--accent); font-weight: bold; text-decoration: underline; margin-left: 4px;">Download Chrome Extension</a> &middot;
+            <a href="guide.html" target="_blank" style="color: var(--accent); font-weight: bold; text-decoration: underline; margin-left: 2px;">Setup Guide</a>
+          </span>
+        </div>
+      </div>
+
+      <div class="ai-mode-container" id="aiModeContainer" style="display:none; margin-bottom:24px;">
+        <label class="ai-toggle-label">
+          <input type="checkbox" id="aiModeCheckbox" />
+          <span class="toggle-custom"></span>
+          <span class="ai-toggle-text">⚡ Google AI Mode (Ask Google Gemini for track languages in background)</span>
+        </label>
+        <p class="ai-disclaimer" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; margin-left: 52px; display: flex; align-items: center; gap: 6px; line-height: 1.4;">
+          <span>⚠️ Note: AI language detection is search-based and may occasionally make mistakes.</span>
+        </p>
+      </div>
+
+      <button class="btn-fetch" id="fetchBtn" onclick="fetchPlaylist()">
+        <span class="btn-text">Fetch Playlist</span>
+        <svg class="btn-icon" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+
+      <div class="error-box" id="errorBox2" style="display:none;"></div>
+    </section>
+
+    <!-- Loading -->
+    <div class="loading-state" id="loadingState" style="display:none;">
+      <div class="spinner-ring"></div>
+      <p id="loadingText">Fetching playlist…</p>
+    </div>
+
+    <!-- Results -->
+    <section class="results-section" id="resultsSection" style="display:none;">
+      <div class="playlist-meta glass-card" id="playlistMeta"></div>
+      <div class="results-toolbar">
+        <div class="track-count" id="trackCountLabel"></div>
+        <div class="toolbar-actions">
+          <button class="btn-secondary" id="copyBtn" onclick="copyToClipboard()">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="currentColor"/></svg>
+            Copy All
+          </button>
+          <button class="btn-primary" id="pdfBtn" onclick="exportToPDF()">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z" fill="currentColor"/></svg>
+            Export PDF
+          </button>
+        </div>
+      </div>
+      <div class="tracks-table glass-card">
+        <div class="table-header">
+          <span class="col-num">#</span>
+          <span class="col-title">Song</span>
+          <span class="col-artists">Artists</span>
+          <span class="col-isrc">ISRC</span>
+          <span class="col-lang">Language</span>
+          <span class="col-link">Link</span>
+        </div>
+        <div class="table-body" id="tracksBody"></div>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="test-app.js"></script>
+</body>
+</html>

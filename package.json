@@ -1,0 +1,8 @@
+{
+  "name": "playlist-info-exporter",
+  "version": "2.0.0",
+  "dependencies": {
+    "isomorphic-unfetch": "^4.0.2",
+    "spotify-url-info": "^3.2.15"
+  }
+}
