@@ -435,7 +435,7 @@ function renderResults() {
       </a>
     </div>`;
 
-  document.getElementById('trackCountLabel').textContent = `${allTracks.length} tracks exported`;
+  document.getElementById('trackCountLabel').innerHTML = `<strong>${allTracks.length}</strong> tracks found`;
 
   const body = document.getElementById('tracksBody');
   body.innerHTML = '';
@@ -445,31 +445,42 @@ function renderResults() {
 
   allTracks.forEach((track, i) => {
     const row = document.createElement('div');
-    row.className = 'table-row';
+    row.className = 'track-row';
+    row.style.animationDelay = `${Math.min(i * 18, 500)}ms`;
     row.innerHTML = `
       <span class="col-num">${i + 1}</span>
-      <span class="col-title" style="display: flex; align-items: center; gap: 8px;">
-        ${track.albumArt ? `<img class="track-thumb" src="${track.albumArt}" style="width: 28px; height: 28px; border-radius: 4px;" />` : `<div style="width:28px; height:28px; background: rgba(255,255,255,0.05); border-radius: 4px;"></div>`}
-        <span class="song-title-text" style="font-weight: 600;">${escHtml(track.name)}</span>
-      </span>
-      <span class="col-artists">${escHtml(track.artists)}</span>
-      <span class="col-isrc" style="font-family: monospace; font-size: 0.85rem; color: #10b981;">${escHtml(track.isrc)}</span>
+      <div class="col-title" style="flex-direction: row; align-items: center; gap: 8px;">
+        ${track.albumArt ? `<img class="track-thumb" src="${track.albumArt}" style="width: 28px; height: 28px; border-radius: 4px; flex-shrink: 0;" />` : `<div style="width:28px; height:28px; background: rgba(255,255,255,0.05); border-radius: 4px; flex-shrink: 0;"></div>`}
+        <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1;">
+          <span class="track-name" title="${escHtml(track.name)}">${escHtml(track.name)}</span>
+          <span class="track-album" title="${escHtml(track.album)}">${escHtml(track.album)}</span>
+        </div>
+      </div>
+      <span class="col-artists" title="${escHtml(track.artists)}">${escHtml(track.artists)}</span>
+      <span class="col-isrc"><span class="isrc-badge">${escHtml(track.isrc)}</span></span>
       <span class="col-lang">
         <span class="lang-badge ${isAiOn ? 'scanning-text' : ''}" id="lang-badge-${i}">
           ${isAiOn ? 'Scanning…' : escHtml(track.language || detectLanguage(track.name, track.isrc))}
         </span>
       </span>
       <span class="col-link">
-        <a href="${track.url}" target="_blank" class="play-link-btn">
+        <a href="${track.url}" target="_blank">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Open
-          <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </a>
       </span>
     `;
     body.appendChild(row);
   });
 
+  const table = document.querySelector('.tracks-table');
+  if (table) {
+    if (isAiOn) table.classList.remove('no-ai-mode');
+    else table.classList.add('no-ai-mode');
+  }
+
   document.getElementById('resultsSection').style.display = 'block';
+  document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
   showToast('Playlist loaded successfully.');
 }
 
