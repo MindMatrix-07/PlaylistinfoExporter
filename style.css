@@ -121,15 +121,19 @@ body {
 }
 
 .header-badge {
+  display: inline-flex;
+  align-items: center;
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 5px 12px;
-  border-radius: 99px;
-  background: rgba(29,185,84,0.15);
-  border: 1px solid rgba(29,185,84,0.3);
-  color: var(--green);
+  text-decoration: none;
+  color: var(--text-secondary);
+  transition: color 0.2s, transform 0.2s;
+}
+
+.header-badge:hover {
+  color: #1DB954;
+  transform: translateY(-1px);
 }
 
 .github-link svg {

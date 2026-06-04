@@ -190,14 +190,13 @@ function updateAuthUI() {
     document.getElementById('authCard').style.display     = token ? 'none'  : 'block';
     document.getElementById('playlistCard').style.display  = token ? 'block' : 'none';
     document.getElementById('connectedStatus').style.display  = token ? 'flex'  : 'none';
-    document.getElementById('notConnectedBadge').style.display = token ? 'none' : 'block';
+    document.getElementById('notConnectedBadge').style.display = token ? 'none' : 'inline-flex';
   } else {
     // Web fetch mode doesn't need auth card or connected status
     document.getElementById('authCard').style.display     = 'none';
     document.getElementById('playlistCard').style.display  = 'block';
     document.getElementById('connectedStatus').style.display  = 'none';
-    document.getElementById('notConnectedBadge').style.display = 'block';
-    document.getElementById('notConnectedBadge').textContent = 'Web Fetch';
+    document.getElementById('notConnectedBadge').style.display = 'inline-flex';
   }
 
   // Restore saved clientId
