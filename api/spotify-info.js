@@ -8,6 +8,18 @@ try {
   console.error('Failed to load spotify-url-info:', e);
 }
 
+// Soundplate's PHP proxy — returns ISRC + album art per Spotify track URL
+const SOUNDPLATE_API = 'https://phpstack-822472-6184058.cloudwaysapps.com/api/spotify.php';
+const SOUNDPLATE_HEADERS = {
+  'accept': '*/*',
+  'accept-language': 'en-US,en;q=0.9',
+  'referer': 'https://phpstack-822472-6184058.cloudwaysapps.com/',
+  'sec-fetch-dest': 'empty',
+  'sec-fetch-mode': 'cors',
+  'sec-fetch-site': 'same-origin',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
+};
+
 module.exports = async (req, res) => {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -33,56 +45,65 @@ module.exports = async (req, res) => {
       throw new Error('spotify-url-info is not installed or failed to load.');
     }
 
-    // Step 1: Scrape playlist info and tracks
+    // Step 1: Scrape playlist info and track list (names, uris)
     console.log('Scraping playlist via spotify-url-info...');
-    const playlistData = await spotifyUrlInfo.getData(url);
-    const rawTracks = await spotifyUrlInfo.getTracks(url);
+    const [playlistData, rawTracks] = await Promise.all([
+      spotifyUrlInfo.getData(url),
+      spotifyUrlInfo.getTracks(url)
+    ]);
     const playlistImage = playlistData.coverArt?.sources?.[0]?.url || '';
 
-    // Step 2: Fetch ISRCs + per-track album art in parallel (no credentials needed)
-    console.log(`Fetching ISRC + album art for ${rawTracks.length} tracks in parallel...`);
+    // Step 2: For each track, call soundplate API to get ISRC + album art
+    console.log(`Fetching ISRC + album art for ${rawTracks.length} tracks via soundplate...`);
 
-    const trackResults = await Promise.all(
+    const trackDetails = await Promise.all(
       rawTracks.map(async (t) => {
         const trackId = t.uri ? t.uri.split(':').pop() : '';
         const trackUrl = trackId ? `https://open.spotify.com/track/${trackId}` : '';
-        const trackName = t.name || '';
-        const artistName = t.artist || '';
 
-        // Fetch ISRC and album art concurrently for this track
-        const [isrc, albumArt] = await Promise.all([
-          // ISRC from boost-collective (no auth)
-          trackName
-            ? fetchIsrcFromBoostCollective(trackName, artistName).catch(() => '—')
-            : Promise.resolve('—'),
+        if (!trackUrl) {
+          return { isrc: '—', albumArt: playlistImage, trackUrl: '' };
+        }
 
-          // Album art from Spotify page scrape (no auth)
-          trackUrl
-            ? fetchAlbumArtFromSpotify(trackUrl).catch(() => playlistImage)
-            : Promise.resolve(playlistImage)
-        ]);
+        try {
+          const resp = await fetch(
+            `${SOUNDPLATE_API}?q=${encodeURIComponent(trackUrl)}`,
+            { headers: SOUNDPLATE_HEADERS }
+          );
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const data = await resp.json();
 
-        return { trackId, trackUrl, isrc, albumArt };
+          if (data.error) throw new Error(data.error);
+
+          return {
+            isrc: data.isrc || '—',
+            albumArt: data.artwork_url || playlistImage,
+            trackUrl
+          };
+        } catch (e) {
+          console.warn(`Failed to get details for track ${trackId}:`, e.message);
+          return { isrc: '—', albumArt: playlistImage, trackUrl };
+        }
       })
     );
 
     // Step 3: Build final track list
     const items = rawTracks.map((t, i) => {
-      const { trackUrl, isrc, albumArt } = trackResults[i];
+      const { isrc, albumArt, trackUrl } = trackDetails[i];
       return {
         track: {
           name: t.name || 'Unknown',
           artists: [{ name: t.artist || 'Unknown Artist' }],
           album: { name: 'Unknown Album' },
-          external_urls: { spotify: trackUrl || '' },
-          external_ids: { isrc: isrc || '—' },
-          albumArt: albumArt || playlistImage
+          external_urls: { spotify: trackUrl },
+          external_ids: { isrc },
+          albumArt
         }
       };
     });
 
     return res.status(200).json({
-      source: 'scraped_with_isrc_lookup',
+      source: 'soundplate_api',
       name: playlistData.name || playlistData.title || 'Playlist',
       owner: {
         display_name: playlistData.subtitle || 'Unknown'
@@ -90,7 +111,7 @@ module.exports = async (req, res) => {
       images: [{ url: playlistImage }],
       tracks: {
         total: items.length,
-        items: items
+        items
       }
     });
 
@@ -99,40 +120,3 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: err.message || 'Server error fetching playlist.' });
   }
 };
-
-function extractPlaylistId(urlStr) {
-  try {
-    const match = urlStr.match(/\/playlist\/([a-zA-Z0-9]{22})/);
-    return match ? match[1] : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Fetch ISRC from boost-collective (no auth required)
-async function fetchIsrcFromBoostCollective(trackName, artistName) {
-  const resp = await fetch('https://www.boost-collective.com/api/artist-tools/isrc', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'referer': 'https://www.boost-collective.com/blog/isrc-finder-tool-free',
-      'origin': 'https://www.boost-collective.com',
-      'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
-    },
-    body: JSON.stringify({ trackName, artistName })
-  });
-  if (!resp.ok) return '—';
-  const data = await resp.json();
-  return data.isrc || '—';
-}
-
-// Scrape per-track album art from Spotify page via spotify-url-info
-async function fetchAlbumArtFromSpotify(trackUrl) {
-  const data = await spotifyUrlInfo.getData(trackUrl);
-  // visualIdentity.image contains artwork at 640, 300, 64 — pick largest (last item)
-  const images = data?.visualIdentity?.image || data?.coverArt?.sources || [];
-  if (!images.length) return '';
-  // Sort descending by maxWidth/width, pick the largest
-  const sorted = [...images].sort((a, b) => (b.maxWidth || b.width || 0) - (a.maxWidth || a.width || 0));
-  return sorted[0]?.url || '';
-}
