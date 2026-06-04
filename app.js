@@ -54,6 +54,7 @@ function detectLanguage(title, isrc) {
 
 const SCOPES = 'playlist-read-private playlist-read-collaborative';
 const REDIRECT_URI = window.location.origin;
+const RENDER_ORIGIN = 'https://playlistinfoexporter.onrender.com';
 
 // ─── PKCE Helpers ────────────────────────────
 
@@ -159,6 +160,14 @@ function disconnectSpotify() {
 // ─── Mode Selector ───────────────────────────
 
 function setFetchMode(mode) {
+  if (mode === 'web' && shouldForwardWebFetchToRender()) {
+    const renderUrl = new URL(window.location.pathname || '/', RENDER_ORIGIN);
+    renderUrl.searchParams.set('mode', 'web');
+    renderUrl.hash = 'web-fetch';
+    window.location.href = renderUrl.href;
+    return;
+  }
+
   activeMode = mode;
   localStorage.setItem('sp_fetch_mode', mode);
 
@@ -502,6 +511,10 @@ function copyToClipboard() {
   navigator.clipboard.writeText(text)
     .then(() => showToast('Copied list tab-separated to clipboard.'))
     .catch(() => showToast('Failed to copy. Please copy manually.'));
+}
+
+function shouldForwardWebFetchToRender() {
+  return window.location.hostname === 'playlistinfoexporter.vercel.app';
 }
 
 function exportToHTML() {
@@ -1251,9 +1264,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const el = document.getElementById('redirectUriDisplay');
   if (el) el.textContent = window.location.origin;
 
-  // Load saved mode or fallback to premium
-  const savedMode = localStorage.getItem('sp_fetch_mode') || 'premium';
+  // Load URL-requested mode, saved mode, or fallback to premium
+  const params = new URLSearchParams(window.location.search);
+  const requestedMode = params.get('mode');
+  const savedMode = requestedMode === 'web' ? 'web' : (localStorage.getItem('sp_fetch_mode') || 'premium');
   setFetchMode(savedMode);
+  if (requestedMode === 'web') {
+    setTimeout(() => {
+      document.getElementById('playlistCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 150);
+  }
 
   // Handle OAuth callback if page has params
   await handleCallback();
