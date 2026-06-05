@@ -1297,6 +1297,8 @@ let hasExtension = false;
 const pendingRequests = new Map();
 const aiDebugLogs = [];
 let aiDebugCounter = 0;
+let aiDebugPanelVisible = false;
+const aiDebugPressedKeys = new Set();
 
 function addAiDebugLog(scope, message, data = {}) {
   const entry = {
@@ -1324,13 +1326,21 @@ function renderAiDebugLog() {
   const summary = document.getElementById('aiDebugSummary');
   if (!panel || !body || !summary) return;
 
-  panel.style.display = 'block';
+  panel.style.display = aiDebugPanelVisible ? 'block' : 'none';
   summary.textContent = `${aiDebugLogs.length} log entr${aiDebugLogs.length === 1 ? 'y' : 'ies'}`;
   body.innerHTML = aiDebugLogs.slice(-90).map(entry => {
     const line = `[${entry.time}] #${entry.id} ${entry.scope}: ${entry.message}${formatAiDebugData(entry.data)}`;
     return `<div class="ai-debug-entry">${escHtml(line)}</div>`;
   }).join('');
   body.scrollTop = body.scrollHeight;
+}
+
+function showAiDebugPanel() {
+  if (aiDebugPanelVisible) return;
+  aiDebugPanelVisible = true;
+  renderAiDebugLog();
+  refreshAiDebugLog();
+  showToast('AI Debug Log opened.');
 }
 
 function clearAiDebugLog() {
@@ -1357,6 +1367,38 @@ function refreshAiDebugLog() {
 
 function createAiRequestId(index, attempt) {
   return `ai-${Date.now().toString(36)}-${index + 1}-${attempt}`;
+}
+
+function normalizeDebugKey(event) {
+  if (event.key === 'Control') return 'ctrl';
+  return event.key.toLowerCase();
+}
+
+function initAiDebugHotkey() {
+  document.addEventListener('keydown', (event) => {
+    const key = normalizeDebugKey(event);
+    if (['ctrl', 'd', 'e', 'b'].includes(key)) {
+      aiDebugPressedKeys.add(key);
+    }
+
+    if (
+      (event.ctrlKey || aiDebugPressedKeys.has('ctrl')) &&
+      aiDebugPressedKeys.has('d') &&
+      aiDebugPressedKeys.has('e') &&
+      aiDebugPressedKeys.has('b')
+    ) {
+      event.preventDefault();
+      showAiDebugPanel();
+    }
+  });
+
+  document.addEventListener('keyup', (event) => {
+    aiDebugPressedKeys.delete(normalizeDebugKey(event));
+  });
+
+  window.addEventListener('blur', () => {
+    aiDebugPressedKeys.clear();
+  });
 }
 
 function checkExtensionPresence() {
@@ -1430,7 +1472,6 @@ function askGoogleAiLang(song, artists, requestId) {
 async function startGoogleAiLanguageDetection() {
   if (aiDetectionInProgress) return;
   aiDetectionInProgress = true;
-  renderAiDebugLog();
 
   const pdfBtn = document.getElementById('pdfBtn');
   const copyBtn = document.getElementById('copyBtn');
@@ -1587,6 +1628,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.postMessage({ type: "PING_PLAYLIST_EXPORTER_EXT" }, "*");
   checkExtensionPresence();
   initAiToggleListener();
+  initAiDebugHotkey();
 
   // Enter key on playlist URL
   document.addEventListener('keydown', e => {
