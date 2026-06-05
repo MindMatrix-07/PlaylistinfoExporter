@@ -101,15 +101,15 @@ async function handleGoogleAiLang(song, artists) {
     });
     silentTabId = win.tabs[0].id;
     // Wait for initial load
-    await new Promise(r => setTimeout(r, 4500));
+    await new Promise(r => setTimeout(r, 7000));
   } else {
     // Wait for response to render
-    await new Promise(r => setTimeout(r, 2500));
+    await new Promise(r => setTimeout(r, 5000));
   }
 
   // 3. Poll for the AI language result
-  const MAX_WAIT_MS = 15000;
-  const POLL_INTERVAL_MS = 800;
+  const MAX_WAIT_MS = 45000;
+  const POLL_INTERVAL_MS = 1000;
   const startTime = Date.now();
   let foundLang = null;
   let captcha = false;

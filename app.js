@@ -1343,7 +1343,7 @@ function askGoogleAiLang(song, artists) {
     const timeout = setTimeout(() => {
       pendingRequests.delete(key);
       reject(new Error('AI Request timed out.'));
-    }, 12000);
+    }, 60000);
 
     pendingRequests.set(key, { resolve, reject, timeout });
 
@@ -1388,6 +1388,8 @@ async function startGoogleAiLanguageDetection() {
         badge.classList.remove('scanning-text');
         badge.textContent = response;
       }
+
+      await sleep(1500);
     } catch (err) {
       console.warn(`[AI Mode] Failed for "${track.name}":`, err.message);
       
