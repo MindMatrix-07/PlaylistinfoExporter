@@ -1298,7 +1298,7 @@ const pendingRequests = new Map();
 const aiDebugLogs = [];
 let aiDebugCounter = 0;
 let aiDebugPanelVisible = false;
-const aiDebugPressedKeys = new Set();
+let aiDebugHotkeyBuffer = '';
 
 function addAiDebugLog(scope, message, data = {}) {
   const entry = {
@@ -1369,35 +1369,22 @@ function createAiRequestId(index, attempt) {
   return `ai-${Date.now().toString(36)}-${index + 1}-${attempt}`;
 }
 
-function normalizeDebugKey(event) {
-  if (event.key === 'Control') return 'ctrl';
-  return event.key.toLowerCase();
-}
-
 function initAiDebugHotkey() {
   document.addEventListener('keydown', (event) => {
-    const key = normalizeDebugKey(event);
-    if (['ctrl', 'd', 'e', 'b'].includes(key)) {
-      aiDebugPressedKeys.add(key);
+    const activeTag = document.activeElement?.tagName?.toLowerCase();
+    if (activeTag === 'input' || activeTag === 'textarea' || document.activeElement?.isContentEditable) {
+      return;
     }
 
-    if (
-      (event.ctrlKey || aiDebugPressedKeys.has('ctrl')) &&
-      aiDebugPressedKeys.has('d') &&
-      aiDebugPressedKeys.has('e') &&
-      aiDebugPressedKeys.has('b')
-    ) {
-      event.preventDefault();
+    if (event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) {
+      return;
+    }
+
+    aiDebugHotkeyBuffer = (aiDebugHotkeyBuffer + event.key.toLowerCase()).slice(-5);
+    if (aiDebugHotkeyBuffer === 'debug') {
+      aiDebugHotkeyBuffer = '';
       showAiDebugPanel();
     }
-  });
-
-  document.addEventListener('keyup', (event) => {
-    aiDebugPressedKeys.delete(normalizeDebugKey(event));
-  });
-
-  window.addEventListener('blur', () => {
-    aiDebugPressedKeys.clear();
   });
 }
 

@@ -544,6 +544,20 @@ async function handleGoogleAiLang(song, artists, requestId) {
           const textToScan = [afterPromptText, newText, recentText].filter(Boolean).join('\n');
 
           const lines = textToScan.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+          const knownLanguages = new Set([
+            'afrikaans','akan','albanian','amharic','arabic','armenian','assamese','awadhi','azerbaijani',
+            'balochi','basque','belarusian','bengali','bhojpuri','bosnian','bulgarian','burmese',
+            'cantonese','catalan','cebuano','chinese','croatian','czech','danish','dogri','dutch',
+            'english','estonian','finnish','french','georgian','german','greek','gujarati','hausa',
+            'hebrew','hindi','hungarian','igbo','indonesian','irish','italian','japanese','javanese',
+            'kannada','kashmiri','kazakh','khmer','konkani','korean','kurdish','lao','latin','latvian',
+            'lithuanian','macedonian','maithili','malay','malayalam','mandarin','manipuri','marathi',
+            'mongolian','nepali','norwegian','odia','oriya','pashto','persian','polish','portuguese',
+            'punjabi','rajasthani','romanian','russian','sanskrit','santali','serbian','sindhi',
+            'sinhala','slovak','slovenian','somali','spanish','sundanese','swahili','swedish',
+            'tagalog','tamil','telugu','thai','tibetan','tulu','turkish','ukrainian','urdu','uzbek',
+            'vietnamese','welsh','yoruba','zulu'
+          ]);
           const badExactLines = new Set([
             'ai mode',
             'ai overview',
@@ -561,7 +575,16 @@ async function handleGoogleAiLang(song, artists, requestId) {
             'copy',
             'share',
             'like',
-            'dislike'
+            'dislike',
+            'you said',
+            'microphone',
+            'ask anything',
+            'voice search',
+            'search by voice',
+            'send',
+            'stop',
+            'listen',
+            'read aloud'
           ]);
 
           const cleanLanguage = (value) => {
@@ -579,20 +602,29 @@ async function handleGoogleAiLang(song, artists, requestId) {
             cleaned = cleaned.replace(/\s*\([^)]*\)\s*$/g, '').trim();
             if (!cleaned || cleaned.length > 48) return '';
             if (badExactLines.has(cleaned.toLowerCase())) return '';
-            if (/what language|reply with|song|lyrics|artist|track/i.test(cleaned)) return '';
+            if (/what language|reply with|song|lyrics|artist|track|you said|microphone|ask anything|voice|search|google|gemini/i.test(cleaned)) return '';
             if (!/^[\p{L}\p{M}][\p{L}\p{M}\s.'’/-]*$/u.test(cleaned)) return '';
             return cleaned;
+          };
+
+          const isKnownLanguage = (value) => {
+            const normalized = cleanLanguage(value).toLowerCase();
+            if (!normalized) return false;
+            if (knownLanguages.has(normalized)) return true;
+            return normalized
+              .split(/\s*[/,]\s*|\s+and\s+/i)
+              .every(part => knownLanguages.has(part.toLowerCase()));
           };
 
           const pickLanguage = (text, allowDirect = true) => {
             const phraseMatch = text.match(/\b(?:is|are)\s+(?:primarily\s+|mainly\s+)?(?:in\s+)?(?:the\s+)?([A-Za-z][A-Za-z\s.'’/-]{1,48}?)\s+language\b/i)
               || text.match(/\b(?:language|lang)\b[^A-Za-z]{0,8}(?:is|:)\s*(?:in\s+)?(?:the\s+)?([A-Za-z][A-Za-z\s.'’/-]{1,48})/i);
             const fromPhrase = cleanLanguage(phraseMatch?.[1]);
-            if (fromPhrase && fromPhrase.split(/\s+/).length <= 4) return fromPhrase;
+            if (fromPhrase && fromPhrase.split(/\s+/).length <= 4 && isKnownLanguage(fromPhrase)) return fromPhrase;
 
             if (!allowDirect) return '';
             const direct = cleanLanguage(text);
-            if (direct && direct.split(/\s+/).length <= 4) return direct;
+            if (direct && direct.split(/\s+/).length <= 4 && isKnownLanguage(direct)) return direct;
             return '';
           };
 
@@ -635,7 +667,7 @@ async function handleGoogleAiLang(song, artists, requestId) {
             .filter(text => text && text.length <= 80);
 
           for (const text of visibleTexts.slice().reverse()) {
-            if (/movie:|singer:|music composer:|lyrics:|source|youtube|shazam/i.test(text)) continue;
+            if (/movie:|singer:|music composer:|lyrics:|source|youtube|shazam|you said|microphone|ask anything/i.test(text)) continue;
             const picked = pickLanguage(text);
             if (picked) candidates.push(picked);
           }
