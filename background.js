@@ -171,25 +171,45 @@ async function handleGoogleAiLang(song, artists) {
             return cleaned;
           };
 
-          const pickLanguage = (text) => {
-            const phraseMatch = text.match(/\b(?:language|lang)\b[^A-Za-z]{0,8}(?:is|:)\s*(?:in\s+)?(?:the\s+)?([A-Za-z][A-Za-z\s.'’/-]{1,48})/i)
-              || text.match(/\b(?:is|are)\s+(?:primarily\s+|mainly\s+)?(?:in\s+)?(?:the\s+)?([A-Za-z][A-Za-z\s.'’/-]{1,48}?)(?:\s+language)?(?:[.!?,]|$)/i);
+          const pickLanguage = (text, allowDirect = true) => {
+            const phraseMatch = text.match(/\b(?:is|are)\s+(?:primarily\s+|mainly\s+)?(?:in\s+)?(?:the\s+)?([A-Za-z][A-Za-z\s.'’/-]{1,48}?)\s+language\b/i)
+              || text.match(/\b(?:language|lang)\b[^A-Za-z]{0,8}(?:is|:)\s*(?:in\s+)?(?:the\s+)?([A-Za-z][A-Za-z\s.'’/-]{1,48})/i);
             const fromPhrase = cleanLanguage(phraseMatch?.[1]);
             if (fromPhrase && fromPhrase.split(/\s+/).length <= 4) return fromPhrase;
 
+            if (!allowDirect) return '';
             const direct = cleanLanguage(text);
             if (direct && direct.split(/\s+/).length <= 4) return direct;
             return '';
           };
 
           const candidates = [];
-          const highlightedTexts = Array.from(document.querySelectorAll('mark strong, mark b, mark, strong.Yjhzub, b.Yjhzub'))
-            .map(el => el.innerText?.trim())
-            .filter(text => text && text.length <= 80);
+          const phraseCandidates = [
+            textToScan,
+            recentText,
+            ...lines
+          ];
 
-          for (const text of highlightedTexts.slice().reverse()) {
-            const picked = pickLanguage(text);
+          for (const text of phraseCandidates.slice().reverse()) {
+            const picked = pickLanguage(text, false);
             if (picked) candidates.push(picked);
+          }
+
+          const highlightedTexts = Array.from(document.querySelectorAll('mark strong, mark b, mark, strong.Yjhzub, b.Yjhzub'))
+            .map(el => {
+              const nearby = el.closest('mark, p, div')?.innerText || el.innerText || '';
+              return { text: el.innerText?.trim(), nearby: nearby.trim() };
+            })
+            .filter(item => item.text && item.text.length <= 80);
+
+          for (const item of highlightedTexts.slice().reverse()) {
+            if (!/\blanguage\b/i.test(item.nearby)) continue;
+            const picked = pickLanguage(`${item.text} language`, false) || pickLanguage(item.nearby, false);
+            if (picked) candidates.push(picked);
+          }
+
+          if (candidates.length) {
+            return { lang: candidates[0], captcha: false };
           }
 
           const visibleTexts = Array.from(document.querySelectorAll('div, span, p, h1, h2, h3'))
@@ -202,12 +222,8 @@ async function handleGoogleAiLang(song, artists) {
             .filter(text => text && text.length <= 80);
 
           for (const text of visibleTexts.slice().reverse()) {
+            if (/movie:|singer:|music composer:|lyrics:|source|youtube|shazam/i.test(text)) continue;
             const picked = pickLanguage(text);
-            if (picked) candidates.push(picked);
-          }
-
-          for (const line of lines.slice().reverse()) {
-            const picked = pickLanguage(line);
             if (picked) candidates.push(picked);
           }
 
