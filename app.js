@@ -251,6 +251,10 @@ function showToast(msg, duration = 2800) {
   setTimeout(() => t.classList.remove('show'), duration);
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function setLoading(show, text = 'Fetching…') {
   document.getElementById('loadingState').style.display = show ? 'flex' : 'none';
   document.getElementById('loadingText').textContent = text;
@@ -1442,64 +1446,72 @@ async function startGoogleAiLanguageDetection() {
   showToast('⚡ Google AI Mode Active: Fetching track languages in background…');
   addAiDebugLog('page', 'Language scan started', { totalTracks: allTracks.length });
 
-  for (let i = 0; i < allTracks.length; i++) {
-    if (!aiDetectionInProgress) break;
+  try {
+    for (let i = 0; i < allTracks.length; i++) {
+      if (!aiDetectionInProgress) break;
 
-    const track = allTracks[i];
-    if (track.language) {
-      addAiDebugLog('page', 'Skipping track with existing language', { row: i + 1, song: track.name, language: track.language });
-      continue;
-    }
-
-    const badge = document.getElementById(`lang-badge-${i}`);
-    if (badge) {
-      badge.textContent = 'Scanning…';
-      badge.classList.add('scanning-text');
-    }
-
-    let response = '';
-    for (let attempt = 1; attempt <= 3 && aiDetectionInProgress; attempt++) {
-      const requestId = createAiRequestId(i, attempt);
-      try {
-        if (badge) badge.textContent = attempt === 1 ? 'Scanning…' : `Retrying ${attempt}/3…`;
-        addAiDebugLog('page', 'Track attempt started', { requestId, row: i + 1, attempt, song: track.name });
-        response = await askGoogleAiLang(track.name, track.artists, requestId);
-        addAiDebugLog('page', 'Track attempt succeeded', { requestId, row: i + 1, language: response });
-        break;
-      } catch (err) {
-        console.warn(`[AI Mode] Failed for "${track.name}" attempt ${attempt}:`, err.message);
-        addAiDebugLog('page', 'Track attempt failed', { requestId, row: i + 1, attempt, error: err.message });
-
-        if (err.message && err.message.includes('CAPTCHA')) {
-          showToast('⚠️ Google CAPTCHA appeared. Please solve it.');
-          aiDetectionInProgress = false;
-          break;
-        }
-
-        if (attempt < 3) {
-          await sleep(3000);
-        }
+      const track = allTracks[i];
+      if (track.language) {
+        addAiDebugLog('page', 'Skipping track with existing language', { row: i + 1, song: track.name, language: track.language });
+        continue;
       }
-    }
 
-    if (!aiDetectionInProgress) break;
-
-    if (response) {
-      track.language = response;
-
+      const badge = document.getElementById(`lang-badge-${i}`);
       if (badge) {
-        badge.classList.remove('scanning-text');
-        badge.textContent = response;
+        badge.textContent = 'Scanning…';
+        badge.classList.add('scanning-text');
       }
 
-      await sleep(2500);
-    } else if (badge) {
-      badge.classList.remove('scanning-text');
-      badge.textContent = 'Skipped';
-      showToast(`Skipped language: ${track.name}`);
-      addAiDebugLog('page', 'Track skipped after retries', { row: i + 1, song: track.name });
-      await sleep(1500);
+      let response = '';
+      for (let attempt = 1; attempt <= 3 && aiDetectionInProgress; attempt++) {
+        const requestId = createAiRequestId(i, attempt);
+        try {
+          if (badge) badge.textContent = attempt === 1 ? 'Scanning…' : `Retrying ${attempt}/3…`;
+          addAiDebugLog('page', 'Track attempt started', { requestId, row: i + 1, attempt, song: track.name });
+          response = await askGoogleAiLang(track.name, track.artists, requestId);
+          addAiDebugLog('page', 'Track attempt succeeded', { requestId, row: i + 1, language: response });
+          break;
+        } catch (err) {
+          console.warn(`[AI Mode] Failed for "${track.name}" attempt ${attempt}:`, err.message);
+          addAiDebugLog('page', 'Track attempt failed', { requestId, row: i + 1, attempt, error: err.message });
+
+          if (err.message && err.message.includes('CAPTCHA')) {
+            showToast('⚠️ Google CAPTCHA appeared. Please solve it.');
+            aiDetectionInProgress = false;
+            break;
+          }
+
+          if (attempt < 3) {
+            addAiDebugLog('page', 'Waiting before retry', { requestId, row: i + 1, ms: 3000 });
+            await sleep(3000);
+          }
+        }
+      }
+
+      if (!aiDetectionInProgress) break;
+
+      if (response) {
+        track.language = response;
+
+        if (badge) {
+          badge.classList.remove('scanning-text');
+          badge.textContent = response;
+        }
+
+        addAiDebugLog('page', 'Waiting before next track', { row: i + 1, ms: 2500 });
+        await sleep(2500);
+      } else if (badge) {
+        badge.classList.remove('scanning-text');
+        badge.textContent = 'Skipped';
+        showToast(`Skipped language: ${track.name}`);
+        addAiDebugLog('page', 'Track skipped after retries', { row: i + 1, song: track.name });
+        await sleep(1500);
+      }
     }
+  } catch (err) {
+    console.error('[AI Mode] Language scan crashed:', err);
+    addAiDebugLog('page', 'Language scan crashed', { error: err.message || String(err) });
+    showToast('Language scan crashed. Check AI Debug Log.');
   }
 
   aiDetectionInProgress = false;
