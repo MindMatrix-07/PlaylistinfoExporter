@@ -631,13 +631,13 @@ async function exportToHTML() {
           <td class="song">
             ${artMarkup}
             <div>
-              <strong>${escHtml(track.name)}</strong>
+              <button class="copy-text song-name" type="button" data-copy="${escAttr(track.name)}">${escHtml(track.name)}</button>
               <span class="album-name no-copy">${escHtml(track.album || '')}</span>
             </div>
           </td>
-          <td>${escHtml(track.artists)}</td>
-          <td><code>${escHtml(track.isrc || '-')}</code></td>
-          ${includeLanguageColumn ? `<td>${escHtml(track.language || '')}</td>` : ''}
+          <td><button class="copy-text" type="button" data-copy="${escAttr(track.artists)}">${escHtml(track.artists)}</button></td>
+          <td><button class="copy-text code-copy" type="button" data-copy="${escAttr(track.isrc || '-')}"><code>${escHtml(track.isrc || '-')}</code></button></td>
+          ${includeLanguageColumn ? `<td><button class="copy-text" type="button" data-copy="${escAttr(track.language || '')}">${escHtml(track.language || '')}</button></td>` : ''}
           <td><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
           <td class="done-cell"><input type="checkbox" data-track-key="${escAttr(trackKey)}" aria-label="Mark ${escAttr(track.name)} done"></td>
         </tr>`;
@@ -671,7 +671,7 @@ async function exportToHTML() {
     th { background: var(--green); color: white; text-align: left; font-size: 13px; padding: 11px 10px; }
     td { border-top: 1px solid var(--line); padding: 10px; vertical-align: middle; font-size: 14px; }
     tr.done { background: rgba(29,185,84,.10); }
-    tr.done .song strong { text-decoration: line-through; color: var(--muted); }
+    tr.done .song .song-name { text-decoration: line-through; color: var(--muted); }
     .num { width: 42px; color: var(--muted); }
     .song { display: flex; gap: 10px; align-items: center; min-width: 280px; }
     .song-art, .song img, .art-placeholder, .art-play { width: 44px; height: 44px; border-radius: 5px; object-fit: cover; flex: 0 0 auto; background: var(--line); }
@@ -681,9 +681,15 @@ async function exportToHTML() {
     .art-play:hover img, .art-play.playing img { filter: brightness(.65); transform: scale(1.04); }
     .art-play:hover .play-state, .art-play.playing .play-state { opacity: 1; }
     .art-play.playing .play-state { background: rgba(29,185,84,.72); }
-    .song strong { display: block; margin-bottom: 4px; }
+    .song-name { display: block; margin-bottom: 4px; font-weight: 700; }
     .song span { color: var(--muted); font-size: 12px; }
     code { color: #00897b; font-weight: 700; font-family: inherit; }
+    .copy-text { appearance: none; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; padding: 2px 3px; margin: -2px -3px; border-radius: 5px; cursor: pointer; user-select: text; -webkit-user-select: text; touch-action: manipulation; }
+    .copy-text:hover, .copy-text:focus-visible { outline: none; background: rgba(29,185,84,.10); color: #087f3f; }
+    .copy-text.copied { background: rgba(29,185,84,.18); color: #087f3f; }
+    .code-copy code { pointer-events: none; }
+    .copy-toast { position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, 18px); opacity: 0; pointer-events: none; background: #101828; color: #fff; border-radius: 8px; padding: 9px 12px; font-size: 13px; box-shadow: 0 10px 28px rgba(0,0,0,.2); transition: opacity .18s, transform .18s; z-index: 10; }
+    .copy-toast.show { opacity: 1; transform: translate(-50%, 0); }
     .open-link { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 32px; border: 1px solid var(--green); color: #087f3f; border-radius: 7px; text-decoration: none; font-weight: 700; }
     .done-cell { text-align: center; width: 64px; }
     input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--green); cursor: pointer; }
@@ -725,6 +731,7 @@ async function exportToHTML() {
     <a href="https://playlistinfoexporter.vercel.app/" target="_blank" rel="noopener">playlistinfoexporter.vercel.app</a>
     <a href="https://playlistinfoexporter.onrender.com/" target="_blank" rel="noopener">playlistinfoexporter.onrender.com</a>
   </footer>
+  <div class="copy-toast" id="copyToast">Copied</div>
   <script type="application/json" id="embeddedDone">{}</script>
   <script type="application/json" id="embeddedTheme">"light"</script>
   <script>
@@ -736,6 +743,7 @@ async function exportToHTML() {
     const embeddedTheme = document.getElementById('embeddedTheme');
     const previewAudio = new Audio();
     let activePreviewButton = null;
+    const copyToast = document.getElementById('copyToast');
     function readEmbeddedJson(el, fallback) {
       try { return JSON.parse(el.textContent || ''); } catch (_) { return fallback; }
     }
@@ -757,6 +765,38 @@ async function exportToHTML() {
     document.querySelectorAll('img.no-copy').forEach(img => {
       img.addEventListener('contextmenu', event => event.preventDefault());
       img.addEventListener('dragstart', event => event.preventDefault());
+    });
+    function showCopyToast(text) {
+      copyToast.textContent = text || 'Copied';
+      copyToast.classList.add('show');
+      clearTimeout(showCopyToast.timer);
+      showCopyToast.timer = setTimeout(() => copyToast.classList.remove('show'), 1200);
+    }
+    async function copySingleText(value, button) {
+      const text = value || '';
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.focus();
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+      }
+      button.classList.add('copied');
+      setTimeout(() => button.classList.remove('copied'), 600);
+      showCopyToast('Copied: ' + (text.length > 28 ? text.slice(0, 28) + '...' : text));
+    }
+    document.querySelectorAll('.copy-text[data-copy]').forEach(button => {
+      button.addEventListener('click', () => copySingleText(button.dataset.copy || '', button));
+      button.addEventListener('touchend', event => {
+        event.preventDefault();
+        copySingleText(button.dataset.copy || '', button);
+      }, { passive: false });
     });
     function stopPreview() {
       previewAudio.pause();
