@@ -637,7 +637,7 @@ async function exportToHTML() {
           </td>
           <td><button class="copy-text" type="button" data-copy="${escAttr(track.artists)}">${escHtml(track.artists)}</button></td>
           <td><button class="copy-text code-copy" type="button" data-copy="${escAttr(track.isrc || '-')}"><code>${escHtml(track.isrc || '-')}</code></button></td>
-          ${includeLanguageColumn ? `<td><button class="copy-text" type="button" data-copy="${escAttr(track.language || '')}">${escHtml(track.language || '')}</button></td>` : ''}
+          ${includeLanguageColumn ? `<td><button class="copy-text language-copy" type="button" data-language-key="${escAttr(trackKey)}" data-copy="${escAttr(track.language || '')}">${escHtml(track.language || '')}</button></td>` : ''}
           <td><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
           <td class="done-cell"><input type="checkbox" data-track-key="${escAttr(trackKey)}" aria-label="Mark ${escAttr(track.name)} done"></td>
         </tr>`;
@@ -688,6 +688,7 @@ async function exportToHTML() {
     .copy-text:hover, .copy-text:focus-visible { outline: none; background: rgba(29,185,84,.10); color: #087f3f; }
     .copy-text.copied { background: rgba(29,185,84,.18); color: #087f3f; }
     .code-copy code { pointer-events: none; }
+    .language-edit { width: 100%; min-width: 92px; border: 1px solid var(--green); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; padding: 5px 7px; }
     .copy-toast { position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, 18px); opacity: 0; pointer-events: none; background: #101828; color: #fff; border-radius: 8px; padding: 9px 12px; font-size: 13px; box-shadow: 0 10px 28px rgba(0,0,0,.2); transition: opacity .18s, transform .18s; z-index: 10; }
     .copy-toast.show { opacity: 1; transform: translate(-50%, 0); }
     .open-link { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 32px; border: 1px solid var(--green); color: #087f3f; border-radius: 7px; text-decoration: none; font-weight: 700; }
@@ -733,6 +734,7 @@ async function exportToHTML() {
   </footer>
   <div class="copy-toast" id="copyToast">Copied</div>
   <script type="application/json" id="embeddedDone">{}</script>
+  <script type="application/json" id="embeddedLanguages">{}</script>
   <script type="application/json" id="embeddedTheme">"light"</script>
   <script>
     const storageKey = ${JSON.stringify(storageKey)};
@@ -740,6 +742,7 @@ async function exportToHTML() {
     const themeKey = storageKey + ':theme';
     const themeToggle = document.getElementById('themeToggle');
     const embeddedDone = document.getElementById('embeddedDone');
+    const embeddedLanguages = document.getElementById('embeddedLanguages');
     const embeddedTheme = document.getElementById('embeddedTheme');
     const previewAudio = new Audio();
     let activePreviewButton = null;
@@ -761,6 +764,9 @@ async function exportToHTML() {
     });
     const embeddedState = readEmbeddedJson(embeddedDone, {});
     const saved = Object.assign({}, embeddedState, JSON.parse(localStorage.getItem(storageKey) || '{}'));
+    const languageKey = storageKey + ':languages';
+    const embeddedLanguageState = readEmbeddedJson(embeddedLanguages, {});
+    const savedLanguages = Object.assign({}, embeddedLanguageState, JSON.parse(localStorage.getItem(languageKey) || '{}'));
     const boxes = document.querySelectorAll('input[type="checkbox"][data-track-key]');
     document.querySelectorAll('img.no-copy').forEach(img => {
       img.addEventListener('contextmenu', event => event.preventDefault());
@@ -797,6 +803,49 @@ async function exportToHTML() {
         event.preventDefault();
         copySingleText(button.dataset.copy || '', button);
       }, { passive: false });
+    });
+    function setLanguageButtonText(button, value) {
+      button.textContent = value;
+      button.dataset.copy = value;
+    }
+    document.querySelectorAll('.language-copy[data-language-key]').forEach(button => {
+      const savedValue = savedLanguages[button.dataset.languageKey];
+      if (typeof savedValue === 'string') setLanguageButtonText(button, savedValue);
+
+      button.addEventListener('dblclick', () => {
+        const current = button.dataset.copy || button.textContent || '';
+        const input = document.createElement('input');
+        input.className = 'language-edit';
+        input.type = 'text';
+        input.value = current;
+        button.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let closed = false;
+        const save = () => {
+          if (closed) return;
+          closed = true;
+          const next = input.value.trim();
+          setLanguageButtonText(button, next);
+          savedLanguages[button.dataset.languageKey] = next;
+          localStorage.setItem(languageKey, JSON.stringify(savedLanguages));
+          input.replaceWith(button);
+          updateEmbeddedState();
+          showCopyToast('Language updated');
+        };
+        const cancel = () => {
+          if (closed) return;
+          closed = true;
+          input.replaceWith(button);
+        };
+
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter') save();
+          if (event.key === 'Escape') cancel();
+        });
+        input.addEventListener('blur', save, { once: true });
+      });
     });
     function stopPreview() {
       previewAudio.pause();
@@ -843,6 +892,7 @@ async function exportToHTML() {
     }
     function updateEmbeddedState() {
       embeddedDone.textContent = JSON.stringify(currentDoneState());
+      embeddedLanguages.textContent = JSON.stringify(savedLanguages);
       embeddedTheme.textContent = JSON.stringify(document.documentElement.dataset.theme || 'light');
     }
     function downloadCurrentHtml() {
