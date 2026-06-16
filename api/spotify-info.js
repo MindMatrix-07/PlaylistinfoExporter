@@ -51,16 +51,21 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Missing Spotify URL parameter.' });
   }
 
+  const spotifyItem = extractSpotifyItem(url);
+  if (!spotifyItem) {
+    return res.status(400).json({ error: 'Paste a Spotify playlist, album, or track URL.' });
+  }
+
   try {
     if (!spotifyUrlInfo) {
       throw new Error('spotify-url-info is not installed or failed to load.');
     }
 
-    // Step 1: Scrape playlist info and track list (names, uris)
-    console.log('Scraping playlist via spotify-url-info...');
+    // Step 1: Scrape Spotify info and track list (names, uris)
+    console.log(`Scraping ${spotifyItem.type} via spotify-url-info...`);
     const playlistData = await spotifyUrlInfo.getData(url);
     const rawTracks = getTracksFromPlaylistData(playlistData);
-    const playlistImage = playlistData.coverArt?.sources?.[0]?.url || '';
+    const playlistImage = getBestImage(playlistData);
 
     // Step 2: For each track, call Soundplate using the same request shape as its iframe widget.
     console.log(`Fetching ISRC + album art for ${rawTracks.length} tracks via soundplate (sequential)...`);
@@ -69,7 +74,7 @@ module.exports = async (req, res) => {
     const trackDetails = [];
 
     for (let i = 0; i < rawTracks.length; i++) {
-      const details = await fetchSoundplateDetails(rawTracks[i], playlistImage);
+      const details = await fetchSoundplateDetails(rawTracks[i], rawTracks[i].albumArt || playlistImage);
       trackDetails.push(details);
 
       if (i + 1 < rawTracks.length) {
@@ -98,9 +103,9 @@ module.exports = async (req, res) => {
 
     const responseBody = {
       source: 'soundplate_api',
-      name: playlistData.name || playlistData.title || 'Playlist',
+      name: playlistData.name || playlistData.title || titleForType(spotifyItem.type),
       owner: {
-        display_name: playlistData.subtitle || 'Unknown'
+        display_name: ownerForSpotifyData(playlistData)
       },
       images: [{ url: playlistImage }],
       tracks: {
@@ -125,8 +130,8 @@ module.exports = async (req, res) => {
     return res.status(200).json(responseBody);
 
   } catch (err) {
-    console.error('Error fetching playlist data:', err);
-    return res.status(500).json({ error: err.message || 'Server error fetching playlist.' });
+    console.error('Error fetching Spotify data:', err);
+    return res.status(500).json({ error: err.message || 'Server error fetching Spotify link.' });
   }
 };
 
@@ -161,6 +166,43 @@ function normalizeArtists(track) {
   }
 
   return ['Unknown Artist'];
+}
+
+function extractSpotifyItem(input) {
+  const value = String(input || '').trim();
+  const uri = value.match(/spotify:(playlist|album|track):([A-Za-z0-9]+)/i);
+  if (uri) return { type: uri[1].toLowerCase(), id: uri[2] };
+
+  const url = value.match(/open\.spotify\.com\/(playlist|album|track)\/([A-Za-z0-9]+)/i);
+  if (url) return { type: url[1].toLowerCase(), id: url[2] };
+
+  return null;
+}
+
+function titleForType(type) {
+  if (type === 'album') return 'Album';
+  if (type === 'track') return 'Song';
+  return 'Playlist';
+}
+
+function ownerForSpotifyData(data) {
+  if (Array.isArray(data.artists) && data.artists.length) {
+    return data.artists.map(artist => artist.name || artist).filter(Boolean).join(', ');
+  }
+  return data.subtitle || data.owner?.name || data.owner?.display_name || 'Unknown';
+}
+
+function getBestImage(data) {
+  const candidates = [
+    data.coverArt?.sources?.[0]?.url,
+    data.visualIdentity?.image?.[0]?.url,
+    data.visualIdentity?.image?.[2]?.url,
+    data.images?.[0]?.url,
+    data.image,
+    data.thumbnail
+  ];
+
+  return candidates.find(Boolean) || '';
 }
 
 async function fetchSoundplateDetails(track, playlistImage) {
@@ -230,16 +272,19 @@ function getTracksFromPlaylistData(playlistData) {
       duration: track.duration,
       name: track.title,
       previewUrl: track.isPlayable ? track.audioPreview?.url : '',
-      uri: track.uri
+      uri: track.uri,
+      albumArt: getBestImage(track)
     }));
   }
 
   return [{
+    artists: playlistData.artists,
     artist: playlistData.subtitle,
     duration: playlistData.duration,
     name: playlistData.title || playlistData.name,
     previewUrl: playlistData.isPlayable ? playlistData.audioPreview?.url : '',
-    uri: playlistData.uri
+    uri: playlistData.uri,
+    albumArt: getBestImage(playlistData)
   }];
 }
 

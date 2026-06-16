@@ -214,7 +214,7 @@ function updateAuthUI() {
   const savedId = localStorage.getItem('sp_client_id');
   if (savedId) document.getElementById('clientId').value = savedId;
 
-  // Restore last playlist URL
+  // Restore last Spotify URL
   const savedUrl = localStorage.getItem('sp_last_url');
   if (savedUrl) document.getElementById('playlistUrl').value = savedUrl;
 }
@@ -264,22 +264,38 @@ function setFetchBtn(disabled) {
   const btn = document.getElementById('fetchBtn');
   if (!btn) return;
   btn.disabled = disabled;
-  btn.querySelector('.btn-text').textContent = disabled ? 'Loading…' : 'Fetch Playlist';
+  btn.querySelector('.btn-text').textContent = disabled ? 'Loading…' : 'Fetch Spotify Link';
 }
 
-// ─── Playlist ID Extractor ───────────────────
+// ─── Spotify URL Parser ──────────────────────
 
-function extractPlaylistId(input) {
-  input = input.trim();
-  const uri = input.match(/spotify:playlist:([a-zA-Z0-9]+)/);
-  if (uri) return uri[1];
-  const url = input.match(/open\.spotify\.com\/playlist\/([a-zA-Z0-9]+)/);
-  if (url) return url[1];
-  if (/^[a-zA-Z0-9]{22}$/.test(input)) return input;
+function extractSpotifyItem(input) {
+  const value = input.trim();
+  const uri = value.match(/spotify:(playlist|album|track):([a-zA-Z0-9]+)/i);
+  if (uri) return { type: uri[1].toLowerCase(), id: uri[2] };
+
+  const url = value.match(/open\.spotify\.com\/(playlist|album|track)\/([a-zA-Z0-9]+)/i);
+  if (url) return { type: url[1].toLowerCase(), id: url[2] };
+
+  if (/^[a-zA-Z0-9]{22}$/.test(value)) return { type: 'playlist', id: value };
   return null;
 }
 
 // ─── Spotify API ──────────────────────────────
+
+function mapSpotifyTrack(t, fallbackAlbum = {}) {
+  const album = t.album || fallbackAlbum || {};
+  return {
+    name:    t.name    || 'Unknown',
+    artists: (t.artists || []).map(a => a.name).join(', '),
+    album:   album.name || '',
+    albumArt: album.images?.[album.images.length - 1]?.url || album.images?.[0]?.url || '',
+    url:     t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
+    isrc:    t.external_ids?.isrc || '—',
+    previewUrl: t.preview_url || '',
+    language: ''
+  };
+}
 
 async function fetchPlaylistMeta(token, playlistId) {
   const resp = await fetch(
@@ -290,6 +306,38 @@ async function fetchPlaylistMeta(token, playlistId) {
     const errBody = await resp.json().catch(() => ({}));
     const errMsg = errBody?.error?.message || `HTTP ${resp.status}`;
     const error = new Error(`Failed to load playlist metadata: ${errMsg} (${resp.status})`);
+    error.status = resp.status;
+    error.spotifyResponse = errBody;
+    throw error;
+  }
+  return resp.json();
+}
+
+async function fetchAlbumMeta(token, albumId) {
+  const resp = await fetch(
+    `https://api.spotify.com/v1/albums/${albumId}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    const errMsg = errBody?.error?.message || `HTTP ${resp.status}`;
+    const error = new Error(`Failed to load album metadata: ${errMsg} (${resp.status})`);
+    error.status = resp.status;
+    error.spotifyResponse = errBody;
+    throw error;
+  }
+  return resp.json();
+}
+
+async function fetchTrackMeta(token, trackId) {
+  const resp = await fetch(
+    `https://api.spotify.com/v1/tracks/${trackId}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!resp.ok) {
+    const errBody = await resp.json().catch(() => ({}));
+    const errMsg = errBody?.error?.message || `HTTP ${resp.status}`;
+    const error = new Error(`Failed to load track metadata: ${errMsg} (${resp.status})`);
     error.status = resp.status;
     error.spotifyResponse = errBody;
     throw error;
@@ -320,17 +368,7 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
     const items = (data.items || []).filter(i => i && (i.track || i.item) && (i.track || i.item).id);
     tracks = tracks.concat(items.map(i => {
       const t = i.track || i.item;
-      const isrc = t.external_ids?.isrc || '—';
-      return {
-        name:    t.name    || 'Unknown',
-        artists: (t.artists || []).map(a => a.name).join(', '),
-        album:   t.album?.name || '',
-        albumArt: t.album?.images?.[t.album.images.length - 1]?.url || t.album?.images?.[0]?.url || '',
-        url:     t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
-        isrc:    isrc,
-        previewUrl: t.preview_url || '',
-        language: ''
-      };
+      return mapSpotifyTrack(t);
     }));
 
     if (onProgress) onProgress(tracks.length, totalExpected || data.total);
@@ -341,15 +379,63 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
   return tracks;
 }
 
+async function fetchAllAlbumTracks(token, albumData, onProgress) {
+  const limit = 50;
+  let offset = 0;
+  let simpleTracks = [];
+
+  while (true) {
+    const resp = await fetch(
+      `https://api.spotify.com/v1/albums/${albumData.id}/tracks?limit=${limit}&offset=${offset}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      const errMsg = errBody?.error?.message || `HTTP ${resp.status}`;
+      const error = new Error(`Failed to fetch album tracks: ${errMsg} (${resp.status})`);
+      error.status = resp.status;
+      error.spotifyResponse = errBody;
+      throw error;
+    }
+
+    const data = await resp.json();
+    simpleTracks = simpleTracks.concat((data.items || []).filter(t => t?.id));
+    if (onProgress) onProgress(simpleTracks.length, data.total || albumData.tracks?.total);
+    if (!data.next) break;
+    offset += limit;
+  }
+
+  const fullTracks = [];
+  for (let i = 0; i < simpleTracks.length; i += 50) {
+    const ids = simpleTracks.slice(i, i + 50).map(t => t.id).join(',');
+    const resp = await fetch(
+      `https://api.spotify.com/v1/tracks?ids=${ids}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      const errMsg = errBody?.error?.message || `HTTP ${resp.status}`;
+      const error = new Error(`Failed to load album track ISRCs: ${errMsg} (${resp.status})`);
+      error.status = resp.status;
+      error.spotifyResponse = errBody;
+      throw error;
+    }
+    const data = await resp.json();
+    fullTracks.push(...(data.tracks || []).filter(Boolean));
+  }
+
+  return fullTracks.map(track => mapSpotifyTrack(track, albumData));
+}
+
 // ─── Main Fetch Handler ───────────────────────
 
 async function fetchPlaylist() {
   hideError('errorBox2');
   const rawUrl = document.getElementById('playlistUrl').value.trim();
 
-  const playlistId = extractPlaylistId(rawUrl);
-  if (!playlistId) {
-    showError('Invalid playlist URL. Example: https://open.spotify.com/playlist/37i9dQZF1DX...', 'errorBox2');
+  const spotifyItem = extractSpotifyItem(rawUrl);
+  if (!spotifyItem) {
+    showError('Invalid Spotify URL. Paste a playlist, album, or song link from open.spotify.com.', 'errorBox2');
     return;
   }
 
@@ -359,7 +445,7 @@ async function fetchPlaylist() {
 
   if (activeMode === 'web') {
     // WEB FETCH MODE (Calls Serverless Endpoint)
-    setLoading(true, 'Fetching playlist via Web Fetch…');
+    setLoading(true, `Fetching ${spotifyItem.type} via Web Fetch…`);
     try {
       const apiUrl = `/api/spotify-info?url=${encodeURIComponent(rawUrl)}`;
       const resp = await fetch(apiUrl);
@@ -418,19 +504,46 @@ async function fetchPlaylist() {
       return;
     }
 
-    setLoading(true, 'Fetching playlist info…');
+    setLoading(true, `Fetching ${spotifyItem.type} info…`);
     try {
-      playlistData = await fetchPlaylistMeta(token, playlistId);
-      if (!playlistData || playlistData.error) {
-        throw new Error(`Could not load playlist: ${playlistData?.error?.message || 'unknown error'}`);
+      if (spotifyItem.type === 'playlist') {
+        playlistData = await fetchPlaylistMeta(token, spotifyItem.id);
+        if (!playlistData || playlistData.error) {
+          throw new Error(`Could not load playlist: ${playlistData?.error?.message || 'unknown error'}`);
+        }
+
+        const total = playlistData?.tracks?.total ?? null;
+        setLoading(true, `Fetching tracks${total ? ` (0 / ${total})` : '…'}…`);
+
+        allTracks = await fetchAllTracks(token, spotifyItem.id, total, (done, all) => {
+          setLoading(true, `Fetching tracks (${done}${all ? ' / ' + all : ''})…`);
+        });
+      } else if (spotifyItem.type === 'album') {
+        const albumData = await fetchAlbumMeta(token, spotifyItem.id);
+        playlistData = {
+          name: albumData.name || 'Album',
+          owner: { display_name: (albumData.artists || []).map(a => a.name).join(', ') || 'Unknown' },
+          images: albumData.images || [],
+          external_urls: albumData.external_urls || { spotify: rawUrl },
+          tracks: { total: albumData.tracks?.total || 0 }
+        };
+
+        const total = albumData.tracks?.total ?? null;
+        setLoading(true, `Fetching album tracks${total ? ` (0 / ${total})` : '…'}…`);
+        allTracks = await fetchAllAlbumTracks(token, albumData, (done, all) => {
+          setLoading(true, `Fetching album tracks (${done}${all ? ' / ' + all : ''})…`);
+        });
+      } else {
+        const trackData = await fetchTrackMeta(token, spotifyItem.id);
+        playlistData = {
+          name: trackData.name || 'Song',
+          owner: { display_name: (trackData.artists || []).map(a => a.name).join(', ') || 'Unknown' },
+          images: trackData.album?.images || [],
+          external_urls: trackData.external_urls || { spotify: rawUrl },
+          tracks: { total: 1 }
+        };
+        allTracks = [mapSpotifyTrack(trackData)];
       }
-
-      const total = playlistData?.tracks?.total ?? null;
-      setLoading(true, `Fetching tracks${total ? ` (0 / ${total})` : '…'}…`);
-
-      allTracks = await fetchAllTracks(token, playlistId, total, (done, all) => {
-        setLoading(true, `Fetching tracks (${done}${all ? ' / ' + all : ''})…`);
-      });
 
       await enrichMissingPreviewUrls();
       setLoading(false);
@@ -476,7 +589,7 @@ function renderResults() {
       </a>
     </div>`;
 
-  document.getElementById('trackCountLabel').innerHTML = `<strong>${allTracks.length}</strong> tracks found`;
+  document.getElementById('trackCountLabel').innerHTML = `<strong>${allTracks.length}</strong> ${allTracks.length === 1 ? 'track' : 'tracks'} found`;
 
   const body = document.getElementById('tracksBody');
   body.innerHTML = '';
@@ -528,7 +641,7 @@ function renderResults() {
 
   document.getElementById('resultsSection').style.display = 'block';
   document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  showToast('Playlist loaded successfully.');
+  showToast('Spotify link loaded successfully.');
 }
 
 function initResultsPreviewControls() {
@@ -707,7 +820,7 @@ async function exportToHTML() {
       ${playlistImage ? `<img class="cover" src="${escAttr(playlistImage)}" alt="">` : '<div class="cover"></div>'}
       <div>
         <h1>${escHtml(playlistName)}</h1>
-        <p class="meta">By ${escHtml(playlistOwner)} · ${allTracks.length} tracks · Exported ${escHtml(exportedAt)}${playlistUrl ? ` · <a href="${escAttr(playlistUrl)}" target="_blank" rel="noopener" style="color:#7df0a2">Open playlist</a>` : ''}</p>
+        <p class="meta">By ${escHtml(playlistOwner)} · ${allTracks.length} ${allTracks.length === 1 ? 'track' : 'tracks'} · Exported ${escHtml(exportedAt)}${playlistUrl ? ` · <a href="${escAttr(playlistUrl)}" target="_blank" rel="noopener" style="color:#7df0a2">Open on Spotify</a>` : ''}</p>
       </div>
       <div class="spotify-mark">
         <img class="no-copy" src="${escAttr(spotifyLogoUrl)}" alt="Spotify" draggable="false">
@@ -1707,7 +1820,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initAiToggleListener();
   initAiDebugHotkey();
 
-  // Enter key on playlist URL
+  // Enter key on Spotify URL
   document.addEventListener('keydown', e => {
     if (e.key === 'Enter' && document.activeElement?.id === 'playlistUrl') fetchPlaylist();
   });
