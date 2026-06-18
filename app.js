@@ -56,8 +56,16 @@ function detectLanguage(title, isrc) {
 
 const SCOPES = 'playlist-read-private playlist-read-collaborative';
 const REDIRECT_URI = window.location.origin;
-const RENDER_ORIGIN = 'https://playlistinfoexporter.onrender.com';
 const VERCEL_ORIGIN = 'https://playlistinfoexporter.vercel.app';
+const WEB_FETCH_ORIGIN = 'https://playlistinfoexporter.onrender.com';
+
+function isPremiumHost() {
+  return window.location.hostname === new URL(VERCEL_ORIGIN).hostname;
+}
+
+function isWebFetchHost() {
+  return !isPremiumHost();
+}
 
 // ─── PKCE Helpers ────────────────────────────
 
@@ -163,12 +171,12 @@ function disconnectSpotify() {
 // ─── Mode Selector ───────────────────────────
 
 function setFetchMode(mode) {
-  if (mode === 'web' && window.location.hostname !== 'playlistinfoexporter.onrender.com') {
-    window.location.href = RENDER_ORIGIN + '/';
+  if (mode === 'web' && !isWebFetchHost()) {
+    window.location.href = WEB_FETCH_ORIGIN + '/';
     return;
   }
 
-  if (mode === 'premium' && window.location.hostname !== 'playlistinfoexporter.vercel.app') {
+  if (mode === 'premium' && !isPremiumHost()) {
     window.location.href = VERCEL_ORIGIN + '/';
     return;
   }
@@ -234,7 +242,7 @@ function showSpotifyApiError(err, rawUrl) {
     <div>
       <div><strong>Spotify API error:</strong> ${escHtml(err.message || 'Unknown error')}</div>
       ${details ? `<pre style="margin:10px 0 0;white-space:pre-wrap;font:12px/1.45 Consolas,monospace;color:#fecaca;">${escHtml(details)}</pre>` : ''}
-      <a href="${RENDER_ORIGIN}/" style="display:inline-flex;margin-top:10px;color:#fca5a5;font-weight:700;">Open with Render Web Fetch</a>
+      <a href="${WEB_FETCH_ORIGIN}/" style="display:inline-flex;margin-top:10px;color:#fca5a5;font-weight:700;">Open with Web Fetch</a>
     </div>
   `, 'errorBox2');
 }
@@ -1805,7 +1813,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const el = document.getElementById('redirectUriDisplay');
   if (el) el.textContent = window.location.origin;
 
-  const defaultMode = window.location.hostname === 'playlistinfoexporter.onrender.com' ? 'web' : 'premium';
+  const defaultMode = isWebFetchHost() ? 'web' : 'premium';
   setFetchMode(defaultMode);
 
   // Handle OAuth callback if page has params

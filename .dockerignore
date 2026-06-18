@@ -1,0 +1,9 @@
+.git
+.github
+node_modules
+npm-debug.log
+.env
+.env.*
+Dockerfile
+.dockerignore
+spotify-playlist-exporter.zip
