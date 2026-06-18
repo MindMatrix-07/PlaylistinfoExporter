@@ -1,16 +1,21 @@
 # Deployment Notes
 
-Render free usage can suspend the web-fetch backend during the billing period. The app can run on any Node host that supports `npm start` and a `PORT` environment variable.
+Render free usage can suspend the web-fetch backend during the billing period. Netlify is the preferred no-credit-card replacement for the Web Fetch copy of the site.
 
-## Koyeb Web Fetch Backend
+## Netlify Web Fetch Backend
 
-1. Create a new Koyeb Web Service from the GitHub repo `MindMatrix-07/PlaylistinfoExporter`.
+1. Create a new Netlify site from the GitHub repo `MindMatrix-07/PlaylistinfoExporter`.
 2. Use branch `main`.
-3. Use either the Node buildpack or Docker.
-4. Build command: `npm install`
-5. Run command: `npm start`
-6. Port: Koyeb sets `PORT`; the server reads it automatically.
+3. Build command: `npm install`
+4. Publish directory: `.`
+5. Functions directory: `netlify/functions`
+6. If Netlify lets you choose the site name, use `playlistinfoexporter` so the URL becomes `https://playlistinfoexporter.netlify.app/`.
 
-After Koyeb gives you the live URL, update `WEB_FETCH_ORIGIN` in `app.js` from the Render URL to the Koyeb URL and push again. Vercel will then send Spotify Web Fetch users to Koyeb.
+The repo includes `netlify.toml`, which routes:
 
-The backend-hosted copy of the site automatically starts in Web Fetch mode on any non-Vercel host, so the Koyeb URL itself should work immediately.
+- `/api/spotify-info` to the fast Spotify-list function.
+- `/api/spotify-track-details` to the short per-track ISRC function.
+
+Web Fetch is split into smaller calls so Netlify does not need to keep one long-running function alive for a full playlist. The page first loads all tracks, then fills ISRC and album details in parallel.
+
+Vercel stays as the Spotify Premium host. Its Spotify Web Fetch button points to `https://playlistinfoexporter.netlify.app/`.

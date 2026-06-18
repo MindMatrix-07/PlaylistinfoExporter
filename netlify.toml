@@ -1,0 +1,14 @@
+[build]
+  publish = "."
+  command = "npm install"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/spotify-info"
+  to = "/.netlify/functions/spotify-info"
+  status = 200
+
+[[redirects]]
+  from = "/api/spotify-track-details"
+  to = "/.netlify/functions/spotify-track-details"
+  status = 200

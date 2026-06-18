@@ -57,7 +57,7 @@ function detectLanguage(title, isrc) {
 const SCOPES = 'playlist-read-private playlist-read-collaborative';
 const REDIRECT_URI = window.location.origin;
 const VERCEL_ORIGIN = 'https://playlistinfoexporter.vercel.app';
-const WEB_FETCH_ORIGIN = 'https://playlistinfoexporter.onrender.com';
+const WEB_FETCH_ORIGIN = 'https://playlistinfoexporter.netlify.app';
 
 function isPremiumHost() {
   return window.location.hostname === new URL(VERCEL_ORIGIN).hostname;
@@ -455,7 +455,7 @@ async function fetchPlaylist() {
     // WEB FETCH MODE (Calls Serverless Endpoint)
     setLoading(true, `Fetching ${spotifyItem.type} via Web Fetch…`);
     try {
-      const apiUrl = `/api/spotify-info?url=${encodeURIComponent(rawUrl)}`;
+      const apiUrl = `/api/spotify-info?url=${encodeURIComponent(rawUrl)}&details=0`;
       const resp = await fetch(apiUrl);
       if (!resp.ok) {
         const errJson = await resp.json().catch(() => ({}));
@@ -484,9 +484,9 @@ async function fetchPlaylist() {
         };
       });
 
-      await enrichMissingPreviewUrls();
       setLoading(false);
       renderResults();
+      resolveWebFetchTrackDetails();
 
       // Trigger Google AI language detection if selected
       const aiModeCheckbox = document.getElementById('aiModeCheckbox');
@@ -578,7 +578,72 @@ async function fetchPlaylist() {
   }
 }
 
-// ─── Render Results ───────────────────────────
+// ─── Results Rendering ────────────────────────
+
+async function resolveWebFetchTrackDetails() {
+  const pending = allTracks
+    .map((track, index) => ({ track, index }))
+    .filter(({ track }) => track.url && (!track.isrc || track.isrc === '—'));
+
+  if (!pending.length) {
+    await enrichMissingPreviewUrls();
+    if (!aiDetectionInProgress) renderResults();
+    return;
+  }
+
+  showToast(`Fetching ISRCs for ${pending.length} track${pending.length === 1 ? '' : 's'}...`, 3500);
+
+  let completed = 0;
+  const concurrency = 5;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < pending.length) {
+      const item = pending[cursor++];
+      await resolveOneWebFetchTrack(item.track, item.index);
+      completed++;
+      setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
+    }
+  }
+
+  setLoading(true, `Fetching ISRCs (0 / ${pending.length})...`);
+  await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, worker));
+  await enrichMissingPreviewUrls();
+  setLoading(false);
+  if (!aiDetectionInProgress) renderResults();
+  showToast('Web Fetch details loaded.');
+}
+
+async function resolveOneWebFetchTrack(track, index) {
+  try {
+    const apiUrl = `/api/spotify-track-details?url=${encodeURIComponent(track.url)}&albumArt=${encodeURIComponent(track.albumArt || '')}`;
+    const resp = await fetch(apiUrl);
+    if (!resp.ok) return;
+    const details = await resp.json();
+    track.isrc = details.isrc || track.isrc || '—';
+    track.album = details.albumName || track.album || '';
+    track.albumArt = details.albumArt || track.albumArt || '';
+    track.url = details.trackUrl || track.url;
+    track.lookupStatus = details.lookupStatus || '';
+    updateRenderedTrackDetails(track, index);
+  } catch (err) {
+    console.warn('[Web Fetch] Track details failed:', track.name, err.message);
+  }
+}
+
+function updateRenderedTrackDetails(track, index) {
+  const row = document.querySelectorAll('#tracksBody .track-row')[index];
+  if (!row) return;
+
+  const isrcBadge = row.querySelector('.isrc-badge');
+  if (isrcBadge) isrcBadge.textContent = track.isrc || '—';
+
+  const album = row.querySelector('.track-album');
+  if (album) {
+    album.textContent = track.album || '';
+    album.title = track.album || '';
+  }
+}
 
 function renderResults() {
   const meta = document.getElementById('playlistMeta');
@@ -851,7 +916,7 @@ async function exportToHTML() {
   </main>
   <footer class="site-footer">
     <a href="https://playlistinfoexporter.vercel.app/" target="_blank" rel="noopener">playlistinfoexporter.vercel.app</a>
-    <a href="https://playlistinfoexporter.onrender.com/" target="_blank" rel="noopener">playlistinfoexporter.onrender.com</a>
+    <a href="https://playlistinfoexporter.netlify.app/" target="_blank" rel="noopener">playlistinfoexporter.netlify.app</a>
   </footer>
   <div class="copy-toast" id="copyToast">Copied</div>
   <script type="application/json" id="embeddedDone">{}</script>

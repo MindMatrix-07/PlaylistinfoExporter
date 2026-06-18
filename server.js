@@ -3,6 +3,7 @@ const http = require('http');
 const path = require('path');
 
 const spotifyInfoHandler = require('./api/spotify-info');
+const spotifyTrackDetailsHandler = require('./api/spotify-track-details');
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
@@ -26,6 +27,13 @@ const server = http.createServer(async (req, res) => {
     req.query = Object.fromEntries(parsedUrl.searchParams.entries());
     addVercelResponseHelpers(res);
     await spotifyInfoHandler(req, res);
+    return;
+  }
+
+  if (parsedUrl.pathname === '/api/spotify-track-details') {
+    req.query = Object.fromEntries(parsedUrl.searchParams.entries());
+    addVercelResponseHelpers(res);
+    await spotifyTrackDetailsHandler(req, res);
     return;
   }
 
