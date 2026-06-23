@@ -83,20 +83,106 @@ function parseSpotifyProfileHtml(html, userId) {
   };
 }
 
+function waitForTabComplete(tabId, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    function finish(ok) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(ok);
+    }
+
+    function listener(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        finish(true);
+      }
+    }
+
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function scrapeSpotifyProfileTab(userId) {
+  const url = `https://open.spotify.com/user/${encodeURIComponent(userId)}`;
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url, active: false });
+    await waitForTabComplete(tab.id);
+    await new Promise(resolve => setTimeout(resolve, 2500));
+
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (profileId) => {
+        const clean = (value) => (value || '').replace(/\s+/g, ' ').trim();
+        const meta = (key) => document.querySelector(`meta[property="${key}"], meta[name="${key}"]`)?.content || '';
+        const title = clean(document.title || '');
+        const ogTitle = clean(meta('og:title'));
+        const heading = clean(document.querySelector('h1')?.textContent || '');
+        const image = meta('og:image')
+          || document.querySelector('img[src*="i.scdn.co/image"], img[src*="spotifycdn.com"]')?.src
+          || '';
+        return {
+          id: profileId,
+          title,
+          ogTitle,
+          heading,
+          image,
+          url: location.href
+        };
+      },
+      args: [userId]
+    });
+
+    const data = result?.result || {};
+    const candidates = [
+      data.ogTitle,
+      data.heading,
+      (data.title || '').replace(/\s+on Spotify\s*$/i, '').trim()
+    ];
+    const name = candidates.find(candidate => isUsableSpotifyProfileName(candidate, userId)) || '';
+    return {
+      id: userId,
+      name,
+      image: data.image || '',
+      url: data.url || url
+    };
+  } finally {
+    if (tab?.id) {
+      await chrome.tabs.remove(tab.id).catch(() => {});
+    }
+  }
+}
+
 async function fetchSpotifyProfilePage(userId) {
   if (spotifyProfileCache.has(userId)) return spotifyProfileCache.get(userId);
 
   const url = `https://open.spotify.com/user/${encodeURIComponent(userId)}`;
-  const resp = await fetch(url, {
-    headers: {
-      'accept': 'text/html,application/xhtml+xml',
-      'user-agent': 'Mozilla/5.0 PlaylistInfoExporter'
-    }
-  });
+  let profile = null;
 
-  if (!resp.ok) throw new Error(`Spotify profile ${userId} failed (${resp.status})`);
-  const html = await resp.text();
-  const profile = parseSpotifyProfileHtml(html, userId);
+  try {
+    const resp = await fetch(url, { headers: { 'accept': 'text/html,application/xhtml+xml' } });
+    if (resp.ok) {
+      const html = await resp.text();
+      profile = parseSpotifyProfileHtml(html, userId);
+    }
+  } catch (err) {
+    addAiDebug('bg', 'Spotify profile fetch fallback needed', { userId, error: err.message });
+  }
+
+  if (!profile?.name || !profile?.image) {
+    const tabProfile = await scrapeSpotifyProfileTab(userId);
+    profile = {
+      id: userId,
+      name: tabProfile.name || profile?.name || '',
+      image: tabProfile.image || profile?.image || '',
+      url: tabProfile.url || profile?.url || url
+    };
+  }
+
   spotifyProfileCache.set(userId, profile);
   return profile;
 }
@@ -104,21 +190,15 @@ async function fetchSpotifyProfilePage(userId) {
 async function handleSpotifyProfiles(userIds = []) {
   const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
   const profiles = {};
-  let cursor = 0;
-  const concurrency = 4;
 
-  async function worker() {
-    while (cursor < uniqueIds.length) {
-      const id = uniqueIds[cursor++];
-      try {
-        profiles[id] = await fetchSpotifyProfilePage(id);
-      } catch (err) {
-        addAiDebug('bg', 'Spotify profile scrape failed', { userId: id, error: err.message });
-      }
+  for (const id of uniqueIds) {
+    try {
+      profiles[id] = await fetchSpotifyProfilePage(id);
+    } catch (err) {
+      addAiDebug('bg', 'Spotify profile scrape failed', { userId: id, error: err.message });
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(concurrency, uniqueIds.length) }, worker));
   return profiles;
 }
 
