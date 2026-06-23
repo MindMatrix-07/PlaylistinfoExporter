@@ -8,6 +8,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "isomorphic-unfetch": "^4.0.2",
     "spotify-url-info": "^3.2.15"
   }
