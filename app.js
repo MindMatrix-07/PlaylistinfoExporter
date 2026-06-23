@@ -392,13 +392,23 @@ function normalizeAddedBy(addedBy) {
   if (!addedBy?.id) return null;
   return {
     id: addedBy.id,
-    name: addedBy.display_name || addedBy.id,
+    name: addedBy.display_name || '',
     url: addedBy.external_urls?.spotify || `https://open.spotify.com/user/${addedBy.id}`,
     image: ''
   };
 }
 
-async function enrichAddedByProfiles(token, tracks, onProgress) {
+function normalizeOwnerProfile(owner) {
+  if (!owner?.id) return null;
+  return {
+    id: owner.id,
+    name: owner.display_name || '',
+    url: owner.external_urls?.spotify || `https://open.spotify.com/user/${owner.id}`,
+    image: owner.images?.[0]?.url || ''
+  };
+}
+
+async function enrichAddedByProfiles(token, tracks, onProgress, fallbackProfiles = []) {
   const uniqueIds = Array.from(new Set(
     tracks.map(track => track.addedBy?.id).filter(Boolean)
   ));
@@ -421,9 +431,26 @@ async function enrichAddedByProfiles(token, tracks, onProgress) {
 
   await Promise.all(Array.from({ length: Math.min(concurrency, uniqueIds.length) }, worker));
 
+  const fallbacks = new Map(
+    fallbackProfiles.filter(Boolean).map(profile => [profile.id, profile])
+  );
+
   tracks.forEach(track => {
-    const profile = profiles.get(track.addedBy?.id);
-    if (profile) track.addedBy = { ...track.addedBy, ...profile };
+    const id = track.addedBy?.id;
+    const fallback = fallbacks.get(id);
+    const profile = profiles.get(id);
+    const next = { ...track.addedBy };
+
+    [fallback, profile].forEach(source => {
+      if (!source) return;
+      next.id = source.id || next.id;
+      next.url = source.url || next.url;
+      if (source.image) next.image = source.image;
+      if (source.name && source.name !== source.id) next.name = source.name;
+    });
+
+    if (!next.name) next.name = next.id || 'Spotify profile';
+    track.addedBy = next;
   });
 }
 
@@ -437,7 +464,7 @@ async function fetchSpotifyUserProfile(token, userId) {
     const data = await resp.json();
     return {
       id: data.id || userId,
-      name: data.display_name || data.id || userId,
+      name: data.display_name || '',
       url: data.external_urls?.spotify || `https://open.spotify.com/user/${userId}`,
       image: data.images?.[0]?.url || ''
     };
@@ -590,7 +617,7 @@ async function fetchPlaylist() {
         setLoading(true, 'Fetching added-by profiles…');
         await enrichAddedByProfiles(token, allTracks, (done, all) => {
           setLoading(true, `Fetching added-by profiles (${done} / ${all})…`);
-        });
+        }, [normalizeOwnerProfile(playlistData.owner)]);
       } else if (spotifyItem.type === 'album') {
         const albumData = await fetchAlbumMeta(token, spotifyItem.id);
         playlistData = {
@@ -880,6 +907,7 @@ async function exportToHTML() {
           : `<img class="no-copy song-art" src="${escAttr(track.albumArt)}" alt="" draggable="false" title="No preview available">`
         : '<span class="art-placeholder no-copy" title="No preview available"></span>';
       const addedBy = track.addedBy || {};
+      const addedByLabel = addedBy.name && addedBy.name !== addedBy.id ? addedBy.name : 'Spotify profile';
       const addedByMarkup = includeAddedByColumn
         ? `<td class="added-by-cell">${
             addedBy.id
@@ -887,7 +915,7 @@ async function exportToHTML() {
                   addedBy.image
                     ? `<img class="no-copy added-by-avatar" src="${escAttr(addedBy.image)}" alt="" draggable="false">`
                     : '<span class="added-by-avatar added-by-fallback no-copy" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/></svg></span>'
-                }<span class="added-by-name">${escHtml(addedBy.name || addedBy.id)}</span></a>`
+                }<span class="added-by-name">${escHtml(addedByLabel)}</span></a>`
               : '<span class="added-by-empty">—</span>'
           }</td>`
         : '';
