@@ -56,12 +56,25 @@ function extractMeta(html, key) {
   return '';
 }
 
+function isUsableSpotifyProfileName(name, userId) {
+  const value = (name || '').trim();
+  if (!value || value === userId) return false;
+  if (/^spotify\s*[-–—]?\s*web\s*player$/i.test(value)) return false;
+  if (/^spotify$/i.test(value)) return false;
+  return true;
+}
+
 function parseSpotifyProfileHtml(html, userId) {
   const title = decodeHtmlEntities(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').trim();
   const metaTitle = extractMeta(html, 'og:title');
-  const rawName = metaTitle || title.replace(/\s+on Spotify\s*$/i, '').trim();
+  const heading = decodeHtmlEntities(html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || '').replace(/<[^>]+>/g, '').trim();
+  const candidates = [
+    metaTitle,
+    heading,
+    title.replace(/\s+on Spotify\s*$/i, '').trim()
+  ];
+  const name = candidates.find(candidate => isUsableSpotifyProfileName(candidate, userId)) || '';
   const image = extractMeta(html, 'og:image');
-  const name = rawName && rawName !== userId ? rawName : '';
   return {
     id: userId,
     name,
