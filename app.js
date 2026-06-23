@@ -291,7 +291,7 @@ function extractSpotifyItem(input) {
 
 // ─── Spotify API ──────────────────────────────
 
-function mapSpotifyTrack(t, fallbackAlbum = {}) {
+function mapSpotifyTrack(t, fallbackAlbum = {}, options = {}) {
   const album = t.album || fallbackAlbum || {};
   return {
     name:    t.name    || 'Unknown',
@@ -301,6 +301,7 @@ function mapSpotifyTrack(t, fallbackAlbum = {}) {
     url:     t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
     isrc:    t.external_ids?.isrc || '—',
     previewUrl: t.preview_url || '',
+    addedBy: options.addedBy || null,
     language: ''
   };
 }
@@ -376,7 +377,7 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
     const items = (data.items || []).filter(i => i && (i.track || i.item) && (i.track || i.item).id);
     tracks = tracks.concat(items.map(i => {
       const t = i.track || i.item;
-      return mapSpotifyTrack(t);
+      return mapSpotifyTrack(t, {}, { addedBy: normalizeAddedBy(i.added_by) });
     }));
 
     if (onProgress) onProgress(tracks.length, totalExpected || data.total);
@@ -385,6 +386,65 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
   }
 
   return tracks;
+}
+
+function normalizeAddedBy(addedBy) {
+  if (!addedBy?.id) return null;
+  return {
+    id: addedBy.id,
+    name: addedBy.display_name || addedBy.id,
+    url: addedBy.external_urls?.spotify || `https://open.spotify.com/user/${addedBy.id}`,
+    image: ''
+  };
+}
+
+async function enrichAddedByProfiles(token, tracks, onProgress) {
+  const uniqueIds = Array.from(new Set(
+    tracks.map(track => track.addedBy?.id).filter(Boolean)
+  ));
+  if (!uniqueIds.length) return;
+
+  const profiles = new Map();
+  let cursor = 0;
+  let done = 0;
+  const concurrency = 4;
+
+  async function worker() {
+    while (cursor < uniqueIds.length) {
+      const id = uniqueIds[cursor++];
+      const profile = await fetchSpotifyUserProfile(token, id);
+      if (profile) profiles.set(id, profile);
+      done++;
+      if (onProgress) onProgress(done, uniqueIds.length);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, uniqueIds.length) }, worker));
+
+  tracks.forEach(track => {
+    const profile = profiles.get(track.addedBy?.id);
+    if (profile) track.addedBy = { ...track.addedBy, ...profile };
+  });
+}
+
+async function fetchSpotifyUserProfile(token, userId) {
+  try {
+    const resp = await fetch(
+      `https://api.spotify.com/v1/users/${encodeURIComponent(userId)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return {
+      id: data.id || userId,
+      name: data.display_name || data.id || userId,
+      url: data.external_urls?.spotify || `https://open.spotify.com/user/${userId}`,
+      image: data.images?.[0]?.url || ''
+    };
+  } catch (err) {
+    console.warn('[Spotify] Failed to fetch added-by profile:', userId, err.message);
+    return null;
+  }
 }
 
 async function fetchAllAlbumTracks(token, albumData, onProgress) {
@@ -525,6 +585,11 @@ async function fetchPlaylist() {
 
         allTracks = await fetchAllTracks(token, spotifyItem.id, total, (done, all) => {
           setLoading(true, `Fetching tracks (${done}${all ? ' / ' + all : ''})…`);
+        });
+
+        setLoading(true, 'Fetching added-by profiles…');
+        await enrichAddedByProfiles(token, allTracks, (done, all) => {
+          setLoading(true, `Fetching added-by profiles (${done} / ${all})…`);
         });
       } else if (spotifyItem.type === 'album') {
         const albumData = await fetchAlbumMeta(token, spotifyItem.id);
@@ -803,6 +868,9 @@ async function exportToHTML() {
     const spotifyLogoUrl = new URL('Spotify_Primary_Logo_RGB_White.png', window.location.href).href;
     const aiModeCheckbox = document.getElementById('aiModeCheckbox');
     const includeLanguageColumn = Boolean(aiModeCheckbox?.checked && allTracks.some(track => track.language));
+    const includeAddedByColumn = allTracks.some(track => track.addedBy?.id);
+    const isrcColumnIndex = includeAddedByColumn ? 5 : 4;
+    const languageColumnIndex = includeAddedByColumn ? 6 : 5;
 
     const rows = allTracks.map((track, index) => {
       const trackKey = getTrackKey(track, index);
@@ -811,6 +879,19 @@ async function exportToHTML() {
           ? `<button class="art-play no-copy" type="button" data-preview-url="${escAttr(track.previewUrl)}" aria-label="Play preview for ${escAttr(track.name)}"><img src="${escAttr(track.albumArt)}" alt="" draggable="false"><span class="play-state">&#9654;</span></button>`
           : `<img class="no-copy song-art" src="${escAttr(track.albumArt)}" alt="" draggable="false" title="No preview available">`
         : '<span class="art-placeholder no-copy" title="No preview available"></span>';
+      const addedBy = track.addedBy || {};
+      const addedByInitial = (addedBy.name || addedBy.id || '?').trim().slice(0, 1).toUpperCase() || '?';
+      const addedByMarkup = includeAddedByColumn
+        ? `<td class="added-by-cell">${
+            addedBy.id
+              ? `<a class="added-by" href="${escAttr(addedBy.url || '#')}" target="_blank" rel="noopener" title="${escAttr(addedBy.name || addedBy.id)}">${
+                  addedBy.image
+                    ? `<img class="no-copy added-by-avatar" src="${escAttr(addedBy.image)}" alt="" draggable="false">`
+                    : `<span class="added-by-avatar added-by-fallback no-copy">${escHtml(addedByInitial)}</span>`
+                }<span>${escHtml(addedBy.name || addedBy.id)}</span></a>`
+              : '<span class="added-by-empty">—</span>'
+          }</td>`
+        : '';
       return `
         <tr>
           <td class="num">${index + 1}</td>
@@ -822,6 +903,7 @@ async function exportToHTML() {
             </div>
           </td>
           <td><button class="copy-text" type="button" data-copy="${escAttr(track.artists)}">${escHtml(track.artists)}</button></td>
+          ${addedByMarkup}
           <td><button class="copy-text code-copy" type="button" data-copy="${escAttr(track.isrc || '-')}"><code>${escHtml(track.isrc || '-')}</code></button></td>
           ${includeLanguageColumn ? `<td><button class="copy-text language-copy" type="button" data-language-key="${escAttr(trackKey)}" data-copy="${escAttr(track.language || '')}">${escHtml(track.language || '')}</button></td>` : ''}
           <td><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
@@ -869,6 +951,12 @@ async function exportToHTML() {
     .art-play.playing .play-state { background: rgba(29,185,84,.72); }
     .song-name { display: block; margin-bottom: 4px; font-weight: 700; }
     .song span { color: var(--muted); font-size: 12px; }
+    .added-by-cell { min-width: 132px; }
+    .added-by { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; font-weight: 700; max-width: 150px; }
+    .added-by span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .added-by-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: var(--line); }
+    .added-by-fallback { display: inline-flex; align-items: center; justify-content: center; color: white; background: var(--green); font-size: 12px; font-weight: 800; }
+    .added-by-empty { color: var(--muted); }
     code { color: #00897b; font-weight: 700; font-family: inherit; }
     .copy-text { appearance: none; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; padding: 2px 3px; margin: -2px -3px; border-radius: 5px; cursor: pointer; user-select: text; -webkit-user-select: text; touch-action: manipulation; }
     .copy-text:hover, .copy-text:focus-visible { outline: none; background: rgba(29,185,84,.10); color: #087f3f; }
@@ -884,7 +972,7 @@ async function exportToHTML() {
     .num, .album-name { pointer-events: none; }
     .site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 18px 36px; }
     .site-footer a { color: var(--green); font-weight: 700; text-decoration: none; margin: 0 8px; }
-    @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4) { display:none; } ${includeLanguageColumn ? 'th:nth-child(5), td:nth-child(5) { display:none; }' : ''} .head { grid-template-columns: auto 1fr; align-items:flex-start; } .spotify-mark { display:none; } }
+    @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(${isrcColumnIndex}), td:nth-child(${isrcColumnIndex}) { display:none; } ${includeLanguageColumn ? `th:nth-child(${languageColumnIndex}), td:nth-child(${languageColumnIndex}) { display:none; }` : ''} ${includeAddedByColumn ? 'th.added-by-head, td.added-by-cell { display:none; }' : ''} .head { grid-template-columns: auto 1fr; align-items:flex-start; } .spotify-mark { display:none; } }
   </style>
 </head>
 <body>
@@ -910,7 +998,7 @@ async function exportToHTML() {
       </div>
     </div>
     <table>
-      <thead><tr><th>#</th><th>Song</th><th>Artists</th><th>ISRC</th>${includeLanguageColumn ? '<th>Language</th>' : ''}<th>Spotify</th><th>Done</th></tr></thead>
+      <thead><tr><th>#</th><th>Song</th><th>Artists</th>${includeAddedByColumn ? '<th class="added-by-head">Added By</th>' : ''}<th>ISRC</th>${includeLanguageColumn ? '<th>Language</th>' : ''}<th>Spotify</th><th>Done</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </main>
