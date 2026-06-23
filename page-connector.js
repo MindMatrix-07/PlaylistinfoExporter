@@ -41,6 +41,32 @@ window.addEventListener("message", (event) => {
     );
   }
 
+  if (event.data?.type === "FROM_PAGE_FETCH_SPOTIFY_PROFILES") {
+    const { userIds, requestId } = event.data;
+
+    chrome.runtime.sendMessage(
+      { type: "FETCH_SPOTIFY_PROFILES", userIds, requestId },
+      (res) => {
+        if (chrome.runtime.lastError) {
+          window.postMessage({
+            type: "FROM_EXT_SPOTIFY_PROFILES_RESPONSE",
+            ok: false,
+            error: chrome.runtime.lastError.message,
+            requestId
+          }, "*");
+        } else {
+          window.postMessage({
+            type: "FROM_EXT_SPOTIFY_PROFILES_RESPONSE",
+            ok: res?.ok ?? false,
+            profiles: res?.profiles || {},
+            error: res?.error,
+            requestId
+          }, "*");
+        }
+      }
+    );
+  }
+
   if (event.data?.type === "FROM_PAGE_GET_AI_DEBUG_LOG") {
     chrome.runtime.sendMessage({ type: "GET_AI_DEBUG_LOG" }, (res) => {
       window.postMessage({

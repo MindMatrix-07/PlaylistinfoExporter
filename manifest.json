@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Playlist Info Exporter",
   "description": "Export Spotify playlists with ISRC, language detection, and Google AI Mode support.",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "permissions": [
     "activeTab",
     "alarms",
@@ -11,7 +11,8 @@
     "tabs"
   ],
   "host_permissions": [
-    "*://*.google.com/*"
+    "*://*.google.com/*",
+    "https://open.spotify.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -24,6 +25,7 @@
       "matches": [
         "https://playlistinfoexporter.vercel.app/*",
         "https://playlistinfoexporter.onrender.com/*",
+        "https://playlistinfoexporter.netlify.app/*",
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],

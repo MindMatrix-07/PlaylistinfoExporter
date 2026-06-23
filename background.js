@@ -28,6 +28,87 @@ function getAiDebugTail(limit = 120) {
   return aiDebugEntries.slice(-limit);
 }
 
+const spotifyProfileCache = new Map();
+
+function decodeHtmlEntities(value = '') {
+  return value
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function extractMeta(html, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [
+    new RegExp(`<meta[^>]+property=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i'),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${escaped}["'][^>]*>`, 'i'),
+    new RegExp(`<meta[^>]+name=["']${escaped}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i'),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escaped}["'][^>]*>`, 'i')
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return decodeHtmlEntities(match[1]).trim();
+  }
+  return '';
+}
+
+function parseSpotifyProfileHtml(html, userId) {
+  const title = decodeHtmlEntities(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').trim();
+  const metaTitle = extractMeta(html, 'og:title');
+  const rawName = metaTitle || title.replace(/\s+on Spotify\s*$/i, '').trim();
+  const image = extractMeta(html, 'og:image');
+  const name = rawName && rawName !== userId ? rawName : '';
+  return {
+    id: userId,
+    name,
+    image,
+    url: `https://open.spotify.com/user/${encodeURIComponent(userId)}`
+  };
+}
+
+async function fetchSpotifyProfilePage(userId) {
+  if (spotifyProfileCache.has(userId)) return spotifyProfileCache.get(userId);
+
+  const url = `https://open.spotify.com/user/${encodeURIComponent(userId)}`;
+  const resp = await fetch(url, {
+    headers: {
+      'accept': 'text/html,application/xhtml+xml',
+      'user-agent': 'Mozilla/5.0 PlaylistInfoExporter'
+    }
+  });
+
+  if (!resp.ok) throw new Error(`Spotify profile ${userId} failed (${resp.status})`);
+  const html = await resp.text();
+  const profile = parseSpotifyProfileHtml(html, userId);
+  spotifyProfileCache.set(userId, profile);
+  return profile;
+}
+
+async function handleSpotifyProfiles(userIds = []) {
+  const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
+  const profiles = {};
+  let cursor = 0;
+  const concurrency = 4;
+
+  async function worker() {
+    while (cursor < uniqueIds.length) {
+      const id = uniqueIds[cursor++];
+      try {
+        profiles[id] = await fetchSpotifyProfilePage(id);
+      } catch (err) {
+        addAiDebug('bg', 'Spotify profile scrape failed', { userId: id, error: err.message });
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, uniqueIds.length) }, worker));
+  return profiles;
+}
+
 // Reset tab reference if closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === silentTabId) {
@@ -63,6 +144,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       });
     return true; // Keep channel open for async response
+  }
+
+  if (message?.type === 'FETCH_SPOTIFY_PROFILES') {
+    handleSpotifyProfiles(message.userIds || [])
+      .then(profiles => sendResponse({ ok: true, profiles }))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
   }
 
   if (message?.type === 'GET_AI_DEBUG_LOG') {

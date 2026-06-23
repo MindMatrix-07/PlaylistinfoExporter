@@ -54,7 +54,7 @@ function detectLanguage(title, isrc) {
   return 'English';
 }
 
-const SCOPES = 'playlist-read-private playlist-read-collaborative';
+const SCOPES = 'playlist-read-private playlist-read-collaborative user-read-private';
 const REDIRECT_URI = window.location.origin;
 const VERCEL_ORIGIN = 'https://playlistinfoexporter.vercel.app';
 const WEB_FETCH_ORIGIN = 'https://playlistinfoexporter.netlify.app';
@@ -431,6 +431,14 @@ async function enrichAddedByProfiles(token, tracks, onProgress, fallbackProfiles
 
   await Promise.all(Array.from({ length: Math.min(concurrency, uniqueIds.length) }, worker));
 
+  let scrapedProfiles = new Map();
+  try {
+    const scraped = await requestSpotifyProfilesFromExtension(uniqueIds);
+    scrapedProfiles = new Map(Object.values(scraped || {}).filter(Boolean).map(profile => [profile.id, profile]));
+  } catch (err) {
+    console.warn('[Spotify] Profile page scrape skipped:', err.message);
+  }
+
   const fallbacks = new Map(
     fallbackProfiles.filter(Boolean).map(profile => [profile.id, profile])
   );
@@ -439,9 +447,10 @@ async function enrichAddedByProfiles(token, tracks, onProgress, fallbackProfiles
     const id = track.addedBy?.id;
     const fallback = fallbacks.get(id);
     const profile = profiles.get(id);
+    const scraped = scrapedProfiles.get(id);
     const next = { ...track.addedBy };
 
-    [fallback, profile].forEach(source => {
+    [fallback, profile, scraped].forEach(source => {
       if (!source) return;
       next.id = source.id || next.id;
       next.url = source.url || next.url;
@@ -451,6 +460,39 @@ async function enrichAddedByProfiles(token, tracks, onProgress, fallbackProfiles
 
     if (!next.name) next.name = next.id || 'Spotify profile';
     track.addedBy = next;
+  });
+}
+
+function requestSpotifyProfilesFromExtension(userIds) {
+  const uniqueIds = Array.from(new Set((userIds || []).filter(Boolean)));
+  if (!uniqueIds.length) return Promise.resolve({});
+
+  const requestId = `spotify-profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'FETCH_SPOTIFY_PROFILES', userIds: uniqueIds, requestId },
+        (res) => {
+          if (chrome.runtime.lastError || !res?.ok) {
+            console.warn('[Spotify] Profile scrape extension request failed:', chrome.runtime.lastError?.message || res?.error);
+            resolve({});
+          } else {
+            resolve(res.profiles || {});
+          }
+        }
+      );
+    });
+  }
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      spotifyProfileRequests.delete(requestId);
+      resolve({});
+    }, 18000);
+
+    spotifyProfileRequests.set(requestId, { resolve, timeout });
+    window.postMessage({ type: 'FROM_PAGE_FETCH_SPOTIFY_PROFILES', userIds: uniqueIds, requestId }, '*');
   });
 }
 
@@ -1687,6 +1729,7 @@ async function exportToPDF() {
 
 let hasExtension = false;
 const pendingRequests = new Map();
+const spotifyProfileRequests = new Map();
 const aiDebugLogs = [];
 let aiDebugCounter = 0;
 let aiDebugPanelVisible = false;
@@ -1975,6 +2018,17 @@ window.addEventListener("message", (event) => {
         }
         break;
       }
+    }
+  }
+
+  if (event.data?.type === "FROM_EXT_SPOTIFY_PROFILES_RESPONSE") {
+    const { ok, profiles, error, requestId } = event.data;
+    const pending = spotifyProfileRequests.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timeout);
+      spotifyProfileRequests.delete(requestId);
+      if (!ok) console.warn('[Spotify] Profile scrape response failed:', error);
+      pending.resolve(ok ? (profiles || {}) : {});
     }
   }
 
