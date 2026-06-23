@@ -880,15 +880,14 @@ async function exportToHTML() {
           : `<img class="no-copy song-art" src="${escAttr(track.albumArt)}" alt="" draggable="false" title="No preview available">`
         : '<span class="art-placeholder no-copy" title="No preview available"></span>';
       const addedBy = track.addedBy || {};
-      const addedByInitial = (addedBy.name || addedBy.id || '?').trim().slice(0, 1).toUpperCase() || '?';
       const addedByMarkup = includeAddedByColumn
         ? `<td class="added-by-cell">${
             addedBy.id
               ? `<a class="added-by" href="${escAttr(addedBy.url || '#')}" target="_blank" rel="noopener" title="${escAttr(addedBy.name || addedBy.id)}">${
                   addedBy.image
                     ? `<img class="no-copy added-by-avatar" src="${escAttr(addedBy.image)}" alt="" draggable="false">`
-                    : `<span class="added-by-avatar added-by-fallback no-copy">${escHtml(addedByInitial)}</span>`
-                }<span>${escHtml(addedBy.name || addedBy.id)}</span></a>`
+                    : '<span class="added-by-avatar added-by-fallback no-copy" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/></svg></span>'
+                }<span class="added-by-name">${escHtml(addedBy.name || addedBy.id)}</span></a>`
               : '<span class="added-by-empty">—</span>'
           }</td>`
         : '';
@@ -951,11 +950,12 @@ async function exportToHTML() {
     .art-play.playing .play-state { background: rgba(29,185,84,.72); }
     .song-name { display: block; margin-bottom: 4px; font-weight: 700; }
     .song span { color: var(--muted); font-size: 12px; }
-    .added-by-cell { min-width: 132px; }
-    .added-by { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); text-decoration: none; font-weight: 700; max-width: 150px; }
-    .added-by span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .added-by-avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: var(--line); }
-    .added-by-fallback { display: inline-flex; align-items: center; justify-content: center; color: white; background: var(--green); font-size: 12px; font-weight: 800; }
+    .added-by-cell { min-width: 190px; max-width: 260px; }
+    .added-by { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-weight: 700; max-width: 250px; min-width: 0; }
+    .added-by-name { min-width: 0; max-width: 195px; overflow-wrap: anywhere; line-height: 1.2; }
+    .added-by-avatar { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: var(--line); }
+    .added-by-fallback { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); background: var(--soft); border: 1px solid var(--line); }
+    .added-by-fallback svg { width: 18px; height: 18px; }
     .added-by-empty { color: var(--muted); }
     code { color: #00897b; font-weight: 700; font-family: inherit; }
     .copy-text { appearance: none; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; padding: 2px 3px; margin: -2px -3px; border-radius: 5px; cursor: pointer; user-select: text; -webkit-user-select: text; touch-action: manipulation; }
