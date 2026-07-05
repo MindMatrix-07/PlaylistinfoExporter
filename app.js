@@ -727,30 +727,22 @@ async function resolveWebFetchTrackDetails() {
 
   showToast(`Fetching ISRCs for ${pending.length} track${pending.length === 1 ? '' : 's'}...`, 3500);
 
-  const batchSize = 50;
-  const batchPauseMs = 15000;
-  const concurrency = 5;
+  const slowLookupThresholdMs = 2000;
+  const slowLookupPauseMs = 15000;
   let completed = 0;
   setLoading(true, `Fetching ISRCs (0 / ${pending.length})...`);
 
-  for (let batchStart = 0; batchStart < pending.length; batchStart += batchSize) {
-    const batch = pending.slice(batchStart, batchStart + batchSize);
-    let cursor = 0;
+  for (const item of pending) {
+    const startedAt = Date.now();
+    await resolveOneWebFetchTrack(item.track, item.index);
+    const elapsedMs = Date.now() - startedAt;
 
-    async function worker() {
-      while (cursor < batch.length) {
-        const item = batch[cursor++];
-        await resolveOneWebFetchTrack(item.track, item.index);
-        completed++;
-        setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
-      }
-    }
+    completed++;
+    setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
 
-    await Promise.all(Array.from({ length: Math.min(concurrency, batch.length) }, worker));
-
-    if (batchStart + batchSize < pending.length) {
-      setLoading(true, `Waiting 15 seconds before next 50 tracks (${completed} / ${pending.length})...`);
-      await sleep(batchPauseMs);
+    if (elapsedMs > slowLookupThresholdMs && completed < pending.length) {
+      setLoading(true, `Slow ISRC lookup detected. Waiting 15 seconds before continuing (${completed} / ${pending.length})...`);
+      await sleep(slowLookupPauseMs);
     }
   }
 
