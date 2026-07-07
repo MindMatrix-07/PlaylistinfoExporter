@@ -1177,8 +1177,8 @@ async function exportToHTML() {
         <h1>${escHtml(playlistName)}</h1>
         <p class="meta">By ${escHtml(playlistOwner)} · ${allTracks.length} ${allTracks.length === 1 ? 'track' : 'tracks'} · Exported ${escHtml(exportedAt)}${playlistUrl ? ` · <a href="${escAttr(playlistUrl)}" target="_blank" rel="noopener" style="color:#7df0a2">Open on Spotify</a>` : ''}</p>
       </div>
-      <div class="spotify-mark" style="color: #1db954;">
-        <svg viewBox="0 0 24 24" fill="currentColor" style="width: 86px; height: 86px;" class="no-copy" draggable="false" aria-hidden="true"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.225 11.91c-.228.37-.713.49-1.083.262-2.72-1.67-6.87-2.154-10.077-1.18-.413.125-.85-.107-.975-.52-.125-.413.107-.85.52-.975 3.66-1.11 8.24-.57 11.35 1.343.37.228.49.714.262 1.083zm.106-2.822C14.48 8.7 8.04 8.484 4.316 9.615c-.596.18-1.23-.158-1.41-.755-.18-.596.158-1.23.755-1.41 4.28-1.298 11.39-1.04 15.426 1.356.537.318.713 1.012.395 1.548-.318.537-1.012.713-1.548.395z"/></svg>
+      <div class="spotify-mark">
+        <img class="no-copy" src="${escAttr(spotifyLogoUrl)}" alt="Spotify" draggable="false">
       </div>
     </div>
   </header>
