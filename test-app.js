@@ -517,6 +517,12 @@ async function fetchPlaylist() {
 
 // ─── Render Results ───────────────────────────
 
+function getAddedByDisplayName(track) {
+  if (!track) return '';
+  if (typeof track.addedBy === 'string') return track.addedBy;
+  return track.addedBy?.name || track.addedBy?.id || '';
+}
+
 function renderResults() {
   const meta = document.getElementById('playlistMeta');
   const img  = playlistData.images?.[0]?.url;
@@ -527,14 +533,14 @@ function renderResults() {
     }
     <div class="playlist-info">
       <h2>${escHtml(playlistData.name)}</h2>
-      <p>By ${escHtml(playlistData.owner?.display_name || 'Unknown')} &nbsp;·&nbsp; ${allTracks.length} tracks</p>
+      <p>By ${escHtml(playlistData.owner?.display_name || 'Unknown')} &nbsp;·&nbsp; ${allTracks.length} ${allTracks.length === 1 ? 'track' : 'tracks'} found</p>
       <a class="playlist-link" href="${playlistData.external_urls?.spotify}" target="_blank">
         Open on Spotify
         <svg viewBox="0 0 24 24" fill="none" style="width:12px;height:12px"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </a>
     </div>`;
 
-  document.getElementById('trackCountLabel').innerHTML = `<strong>${allTracks.length}</strong> tracks found`;
+  document.getElementById('trackCountLabel').innerHTML = `<strong>${allTracks.length}</strong> ${allTracks.length === 1 ? 'track' : 'tracks'} found`;
 
   const body = document.getElementById('tracksBody');
   body.innerHTML = '';
@@ -562,6 +568,7 @@ function renderResults() {
       </div>
       <span class="col-artists" title="${escHtml(track.artists)}">${escHtml(track.artists)}</span>
       <span class="col-isrc"><span class="isrc-badge">${escHtml(track.isrc)}</span></span>
+      <span class="col-added-by"><span class="added-by-badge" data-index="${i}">${escHtml(getAddedByDisplayName(track) || '—')}</span></span>
       <span class="col-lang">
         <span class="lang-badge ${isAiOn ? 'scanning-text' : ''}" id="lang-badge-${i}">
           ${isAiOn ? 'Scanning…' : escHtml(track.language || detectLanguage(track.name, track.isrc))}
@@ -576,6 +583,62 @@ function renderResults() {
     `;
     body.appendChild(row);
   });
+
+  // Add edit listeners for Added by badges
+  body.querySelectorAll('.added-by-badge').forEach(badge => {
+    const idx = parseInt(badge.dataset.index);
+    const track = allTracks[idx];
+
+    const triggerEdit = () => {
+      const current = getAddedByDisplayName(track);
+      const input = document.createElement('input');
+      input.className = 'added-by-edit-input';
+      input.type = 'text';
+      input.value = current;
+      badge.replaceWith(input);
+      input.focus();
+      input.select();
+
+      let closed = false;
+      const save = () => {
+        if (closed) return;
+        closed = true;
+        const next = input.value.trim();
+        if (typeof track.addedBy === 'object' && track.addedBy !== null) {
+          track.addedBy.name = next;
+        } else {
+          track.addedBy = { id: next, name: next, url: '', image: '' };
+        }
+        renderResults();
+        showToast('Added by updated.');
+      };
+      const cancel = () => {
+        if (closed) return;
+        closed = true;
+        input.replaceWith(badge);
+      };
+
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') save();
+        if (event.key === 'Escape') cancel();
+      });
+      input.addEventListener('blur', save, { once: true });
+    };
+
+    badge.addEventListener('dblclick', triggerEdit);
+
+    let lastTap = 0;
+    badge.addEventListener('touchend', event => {
+      const currentTime = new Date().getTime();
+      const tapLength = currentTime - lastTap;
+      if (tapLength < 500 && tapLength > 0) {
+        event.preventDefault();
+        triggerEdit();
+      }
+      lastTap = currentTime;
+    });
+  });
+
   initResultsPreviewControls();
 
   const table = document.querySelector('.tracks-table');
@@ -683,6 +746,7 @@ async function exportToHTML() {
           ? `<button class="art-play no-copy" type="button" data-preview-url="${escAttr(track.previewUrl)}" aria-label="Play preview for ${escAttr(track.name)}"><img src="${escAttr(track.albumArt)}" alt="" draggable="false"><span class="play-state">&#9654;</span></button>`
           : `<img class="no-copy song-art" src="${escAttr(track.albumArt)}" alt="" draggable="false" title="No preview available">`
         : '<span class="art-placeholder no-copy" title="No preview available"></span>';
+      const addedByVal = getAddedByDisplayName(track);
       return `
         <tr>
           <td class="num">${index + 1}</td>
@@ -695,8 +759,10 @@ async function exportToHTML() {
           </td>
           <td class="artists-cell">${escHtml(track.artists)}</td>
           <td class="isrc-cell"><code>${escHtml(track.isrc || '-')}</code></td>
+          <td class="added-by-cell"><button class="copy-text added-by-copy" type="button" data-track-key="${escAttr(trackKey)}" data-copy="${escAttr(addedByVal)}">${escHtml(addedByVal || '—')}</button></td>
           ${includeLanguageColumn ? `<td class="language-cell">${escHtml(track.language || '')}</td>` : ''}
           <td class="link-cell"><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
+          <td class="requested-cell"><input type="checkbox" class="requested-checkbox" data-requested-key="${escAttr(trackKey)}" aria-label="Mark ${escAttr(track.name)} requested"></td>
           <td class="done-cell"><input type="checkbox" data-track-key="${escAttr(trackKey)}" aria-label="Mark ${escAttr(track.name)} done"></td>
         </tr>`;
     }).join('');
@@ -728,7 +794,8 @@ async function exportToHTML() {
     table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; box-shadow: 0 12px 32px rgba(16,24,40,.08); }
     th { background: var(--green); color: white; text-align: left; font-size: 13px; padding: 11px 10px; }
     td { border-top: 1px solid var(--line); padding: 10px; vertical-align: middle; font-size: 14px; }
-    tr.done { background: rgba(29,185,84,.10); }
+    tr.requested { background: rgba(234,179,8,.10); }
+    tr.done, tr.done.requested { background: rgba(29,185,84,.10); }
     tr.done .song strong { text-decoration: line-through; color: var(--muted); }
     .num { width: 42px; color: var(--muted); }
     .song { display: flex; gap: 10px; align-items: center; min-width: 280px; }
@@ -741,10 +808,19 @@ async function exportToHTML() {
     .art-play.playing .play-state { background: rgba(29,185,84,.72); }
     .song strong { display: block; margin-bottom: 4px; }
     .song span { color: var(--muted); font-size: 12px; }
+    .added-by-cell { min-width: 120px; }
     code { color: #00897b; font-weight: 700; font-family: inherit; }
+    .copy-text { appearance: none; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; padding: 2px 3px; margin: -2px -3px; border-radius: 5px; cursor: pointer; user-select: text; -webkit-user-select: text; touch-action: manipulation; }
+    .copy-text:hover, .copy-text:focus-visible { outline: none; background: rgba(29, 185, 84, 0.10); color: #087f3f; }
+    .copy-text.copied { background: rgba(29, 185, 84, 0.18); color: #087f3f; }
+    .code-copy code { pointer-events: none; }
+    .language-edit { width: 100%; min-width: 92px; border: 1px solid var(--green); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; padding: 5px 7px; }
+    .copy-toast { position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, 18px); opacity: 0; pointer-events: none; background: #101828; color: #fff; border-radius: 8px; padding: 9px 12px; font-size: 13px; box-shadow: 0 10px 28px rgba(0,0,0,.2); transition: opacity .18s, transform .18s; z-index: 10; }
+    .copy-toast.show { opacity: 1; transform: translate(-50%, 0); }
     .open-link { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 32px; border: 1px solid var(--green); color: #087f3f; border-radius: 7px; text-decoration: none; font-weight: 700; }
-    .done-cell { text-align: center; width: 64px; }
+    .requested-cell, .done-cell { text-align: center; width: 64px; }
     input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--green); cursor: pointer; }
+    input[type="checkbox"].requested-checkbox { accent-color: #eab308; }
     .no-copy, .num, .album-name, .spotify-mark, .spotify-mark img { -webkit-user-select: none; user-select: none; -webkit-user-drag: none; }
     .num, .album-name { pointer-events: none; }
     .site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 18px 36px; }
@@ -769,10 +845,14 @@ async function exportToHTML() {
         border-radius: 12px !important;
         align-items: center;
       }
-      tr.done {
-        background: var(--panel) !important;
-        opacity: 0.8;
+      tr.requested {
+        background: rgba(234,179,8,0.06) !important;
+        border-color: #eab308 !important;
+      }
+      tr.done, tr.done.requested {
+        background: rgba(29,185,84,0.06) !important;
         border-color: var(--green) !important;
+        opacity: 0.85;
       }
       td {
         border: none !important;
@@ -806,6 +886,10 @@ async function exportToHTML() {
         font-size: 13px;
         line-height: 1.4;
       }
+      .added-by-cell {
+        grid-column: 2 / span 4;
+        grid-row: 3;
+      }
       .isrc-cell {
         grid-column: 2;
         grid-row: 4;
@@ -815,6 +899,13 @@ async function exportToHTML() {
       .language-cell {
         grid-column: 3;
         grid-row: 4;
+        display: flex;
+        align-items: center;
+      }
+      .requested-cell {
+        grid-column: 4;
+        grid-row: 4;
+        justify-self: end;
         display: flex;
         align-items: center;
       }
@@ -847,11 +938,12 @@ async function exportToHTML() {
       <div class="toolbar-actions">
         <button class="save-copy" id="saveCopy">Save HTML Copy</button>
         <button class="theme-toggle" id="themeToggle">Dark Mode</button>
+        <button class="clear" id="clearRequested">Clear Requested</button>
         <button class="clear" id="clearDone">Clear Done</button>
       </div>
     </div>
     <table>
-      <thead><tr><th>#</th><th>Song</th><th>Artists</th><th>ISRC</th>${includeLanguageColumn ? '<th>Language</th>' : ''}<th>Spotify</th><th>Done</th></tr></thead>
+      <thead><tr><th>#</th><th>Song</th><th>Artists</th><th>ISRC</th><th>Added by</th>${includeLanguageColumn ? '<th>Language</th>' : ''}<th>Spotify</th><th>Requested this week</th><th>Done</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
   </main>
@@ -859,17 +951,27 @@ async function exportToHTML() {
     <a href="https://playlistinfoexporter.vercel.app/" target="_blank" rel="noopener">playlistinfoexporter.vercel.app</a>
     <a href="https://playlistinfoexporter.onrender.com/" target="_blank" rel="noopener">playlistinfoexporter.onrender.com</a>
   </footer>
+  <div class="copy-toast" id="copyToast">Copied</div>
   <script type="application/json" id="embeddedDone">{}</script>
+  <script type="application/json" id="embeddedRequested">{}</script>
+  <script type="application/json" id="embeddedAddedBy">{}</script>
   <script type="application/json" id="embeddedTheme">"light"</script>
   <script>
     const storageKey = ${JSON.stringify(storageKey)};
     const fileName = ${JSON.stringify(htmlFileName)};
     const themeKey = storageKey + ':theme';
+    const addedByKey = storageKey + ':addedby';
+    const requestedKey = storageKey + ':requested';
+
     const themeToggle = document.getElementById('themeToggle');
     const embeddedDone = document.getElementById('embeddedDone');
+    const embeddedRequested = document.getElementById('embeddedRequested');
+    const embeddedAddedBy = document.getElementById('embeddedAddedBy');
     const embeddedTheme = document.getElementById('embeddedTheme');
     const previewAudio = new Audio();
     let activePreviewButton = null;
+    const copyToast = document.getElementById('copyToast');
+
     function readEmbeddedJson(el, fallback) {
       try { return JSON.parse(el.textContent || ''); } catch (_) { return fallback; }
     }
@@ -885,13 +987,114 @@ async function exportToHTML() {
       applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
       updateEmbeddedState();
     });
+
     const embeddedState = readEmbeddedJson(embeddedDone, {});
     const saved = Object.assign({}, embeddedState, JSON.parse(localStorage.getItem(storageKey) || '{}'));
+
+    const embeddedRequestedState = readEmbeddedJson(embeddedRequested, {});
+    const savedRequested = Object.assign({}, embeddedRequestedState, JSON.parse(localStorage.getItem(requestedKey) || '{}'));
+
+    const embeddedAddedByState = readEmbeddedJson(embeddedAddedBy, {});
+    const savedAddedBy = Object.assign({}, embeddedAddedByState, JSON.parse(localStorage.getItem(addedByKey) || '{}'));
+
     const boxes = document.querySelectorAll('input[type="checkbox"][data-track-key]');
+    const reqBoxes = document.querySelectorAll('input[type="checkbox"][data-requested-key]');
+
     document.querySelectorAll('img.no-copy').forEach(img => {
       img.addEventListener('contextmenu', event => event.preventDefault());
       img.addEventListener('dragstart', event => event.preventDefault());
     });
+    function showCopyToast(text) {
+      copyToast.textContent = text || 'Copied';
+      copyToast.classList.add('show');
+      clearTimeout(showCopyToast.timer);
+      showCopyToast.timer = setTimeout(() => copyToast.classList.remove('show'), 1200);
+    }
+    async function copySingleText(value, button) {
+      const text = value || '';
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_) {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        area.readOnly = true;
+        document.body.appendChild(area);
+        area.focus();
+        area.select();
+        document.execCommand('copy');
+        document.body.removeChild(area);
+      }
+      button.classList.add('copied');
+      setTimeout(() => button.classList.remove('copied'), 600);
+      showCopyToast('Copied: ' + (text.length > 28 ? text.slice(0, 28) + '...' : text));
+    }
+    document.querySelectorAll('.copy-text[data-copy]').forEach(button => {
+      button.addEventListener('click', () => copySingleText(button.dataset.copy || '', button));
+      button.addEventListener('touchend', event => {
+        event.preventDefault();
+        copySingleText(button.dataset.copy || '', button);
+      }, { passive: false });
+    });
+
+    function setAddedByButtonText(button, value) {
+      button.textContent = value || '—';
+      button.dataset.copy = value;
+    }
+    document.querySelectorAll('.added-by-copy[data-track-key]').forEach(button => {
+      const savedValue = savedAddedBy[button.dataset.trackKey];
+      if (typeof savedValue === 'string') setAddedByButtonText(button, savedValue);
+
+      const triggerEdit = () => {
+        const current = button.dataset.copy || '';
+        const input = document.createElement('input');
+        input.className = 'language-edit';
+        input.type = 'text';
+        input.value = current;
+        button.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let closed = false;
+        const save = () => {
+          if (closed) return;
+          closed = true;
+          const next = input.value.trim();
+          setAddedByButtonText(button, next);
+          savedAddedBy[button.dataset.trackKey] = next;
+          localStorage.setItem(addedByKey, JSON.stringify(savedAddedBy));
+          input.replaceWith(button);
+          updateEmbeddedState();
+          showCopyToast('Added by updated');
+        };
+        const cancel = () => {
+          if (closed) return;
+          closed = true;
+          input.replaceWith(button);
+        };
+
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter') save();
+          if (event.key === 'Escape') cancel();
+        });
+        input.addEventListener('blur', save, { once: true });
+      };
+
+      button.addEventListener('dblclick', triggerEdit);
+
+      let lastTap = 0;
+      button.addEventListener('touchend', event => {
+        const currentTime = new Date().getTime();
+        const tapLength = currentTime - lastTap;
+        if (tapLength < 500 && tapLength > 0) {
+          event.preventDefault();
+          triggerEdit();
+        }
+        lastTap = currentTime;
+      });
+    });
+
     function stopPreview() {
       previewAudio.pause();
       previewAudio.removeAttribute('src');
@@ -929,14 +1132,30 @@ async function exportToHTML() {
     previewAudio.addEventListener('pause', () => {
       if (previewAudio.ended) stopPreview();
     });
-    function syncRow(box) { box.closest('tr').classList.toggle('done', box.checked); }
+
+    function syncRow(box) {
+      const row = box.closest('tr');
+      const doneBox = row.querySelector('input[type="checkbox"][data-track-key]');
+      const reqBox = row.querySelector('input[type="checkbox"][data-requested-key]');
+      const isDone = doneBox && doneBox.checked;
+      const isReq = reqBox && reqBox.checked;
+      row.classList.toggle('done', isDone);
+      row.classList.toggle('requested', isReq);
+    }
     function currentDoneState() {
       const state = {};
       boxes.forEach(box => { if (box.checked) state[box.dataset.trackKey] = true; });
       return state;
     }
+    function currentRequestedState() {
+      const state = {};
+      reqBoxes.forEach(box => { if (box.checked) state[box.dataset.requestedKey] = true; });
+      return state;
+    }
     function updateEmbeddedState() {
       embeddedDone.textContent = JSON.stringify(currentDoneState());
+      embeddedRequested.textContent = JSON.stringify(currentRequestedState());
+      embeddedAddedBy.textContent = JSON.stringify(savedAddedBy);
       embeddedTheme.textContent = JSON.stringify(document.documentElement.dataset.theme || 'light');
     }
     function downloadCurrentHtml() {
@@ -953,6 +1172,7 @@ async function exportToHTML() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }
+
     boxes.forEach(box => {
       box.checked = saved[box.dataset.trackKey] === true;
       syncRow(box);
@@ -963,11 +1183,28 @@ async function exportToHTML() {
         updateEmbeddedState();
       });
     });
+
+    reqBoxes.forEach(box => {
+      box.checked = savedRequested[box.dataset.requestedKey] === true;
+      syncRow(box);
+      box.addEventListener('change', () => {
+        savedRequested[box.dataset.requestedKey] = box.checked;
+        localStorage.setItem(requestedKey, JSON.stringify(savedRequested));
+        syncRow(box);
+        updateEmbeddedState();
+      });
+    });
+
     updateEmbeddedState();
     document.getElementById('saveCopy').addEventListener('click', downloadCurrentHtml);
     document.getElementById('clearDone').addEventListener('click', () => {
       boxes.forEach(box => { box.checked = false; delete saved[box.dataset.trackKey]; syncRow(box); });
       localStorage.setItem(storageKey, JSON.stringify(saved));
+      updateEmbeddedState();
+    });
+    document.getElementById('clearRequested').addEventListener('click', () => {
+      reqBoxes.forEach(box => { box.checked = false; delete savedRequested[box.dataset.requestedKey]; syncRow(box); });
+      localStorage.setItem(requestedKey, JSON.stringify(savedRequested));
       updateEmbeddedState();
     });
   </script>
@@ -1128,7 +1365,7 @@ function drawOpenTrackButton(doc, x, y, url) {
   doc.link(x, y, size, size, { url });
 }
 
-function addDoneCheckbox(doc, fieldName, x, y, size) {
+function addPdfCheckbox(doc, fieldName, x, y, size, colorR = 29, colorG = 185, colorB = 84) {
   if (typeof doc.AcroFormCheckBox === 'function' && typeof doc.addField === 'function') {
     try {
       const checkbox = new doc.AcroFormCheckBox();
@@ -1147,7 +1384,7 @@ function addDoneCheckbox(doc, fieldName, x, y, size) {
     }
   }
 
-  doc.setDrawColor(29, 185, 84);
+  doc.setDrawColor(colorR, colorG, colorB);
   doc.setFillColor(255, 255, 255);
   doc.roundedRect(x, y, size, size, 0.8, 0.8, 'FD');
 }
@@ -1157,10 +1394,10 @@ function addDoneCheckbox(doc, fieldName, x, y, size) {
 async function exportToPDF() {
   if (!allTracks.length || !playlistData) return;
 
-  const pdfBtn  = document.getElementById('pdfBtn');
+  const pdfBtn = document.getElementById('pdfBtn');
   const copyBtn = document.getElementById('copyBtn');
 
-  if (pdfBtn)  pdfBtn.disabled = true;
+  if (pdfBtn) pdfBtn.disabled = true;
   if (copyBtn) copyBtn.disabled = true;
 
   try {
@@ -1186,7 +1423,7 @@ async function exportToPDF() {
       doc.setFillColor(248, 250, 252); doc.rect(0, 0, pageW, 24, 'F');
       doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(29, 185, 84);
       doc.text('Playlist Info Exporter', mL, 15);
-      
+
       const plLabel = playlistData.name.slice(0, 32) + (playlistData.name.length > 32 ? '…' : '');
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 160);
       const rightTextWidth = doc.getTextWidth(plLabel);
@@ -1259,7 +1496,7 @@ async function exportToPDF() {
 
     // ─── TRACKS PAGE ──────────────────────────────
     doc.addPage(); drawHeader(); y = 32;
-    doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(20,20,40);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(20, 20, 40);
     doc.text('Track List', mL, y); y += 8;
 
     const aiModeCheckbox = document.getElementById('aiModeCheckbox');
@@ -1267,44 +1504,52 @@ async function exportToPDF() {
 
     const thumbSize = 9; // mm — album art thumbnail square
 
-    let cN, cS, cA, cI, cLa, cOpen, cDone;
-    let songWrapWidth, albumWrapWidth, artistWrapWidth, langWrapWidth;
+    let cN, cS, cA, cI, cAdd, cLa, cOpen, cReq, cDone;
+    let songWrapWidth, artistWrapWidth, isrcWrapWidth, addedWrapWidth, langWrapWidth;
 
     if (isAiOn) {
       cN = mL;
-      cS = mL + 18;        // shifted right: #(4) + thumb(9) + gap(5)
-      cA = mL + 70;
-      cI = mL + 110;
-      cLa = mL + 138;
-      cOpen = mL + 158;
-      cDone = mL + 171;
-      songWrapWidth = 46;
-      albumWrapWidth = 46;
-      artistWrapWidth = 38;
+      cS = mL + 6;
+      cA = mL + 42;
+      cI = mL + 78;
+      cAdd = mL + 106;
+      cLa = mL + 130;
+      cOpen = mL + 154;
+      cReq = mL + 167;
+      cDone = mL + 180;
+      songWrapWidth = 32;
+      artistWrapWidth = 32;
+      isrcWrapWidth = 24;
+      addedWrapWidth = 20;
       langWrapWidth = 20;
     } else {
       cN = mL;
-      cS = mL + 18;
-      cA = mL + 80;
-      cI = mL + 130;
+      cS = mL + 6;
+      cA = mL + 48;
+      cI = mL + 88;
+      cAdd = mL + 118;
       cLa = null;
       cOpen = mL + 154;
-      cDone = mL + 170;
-      songWrapWidth = 56;
-      albumWrapWidth = 56;
-      artistWrapWidth = 46;
+      cReq = mL + 167;
+      cDone = mL + 180;
+      songWrapWidth = 38;
+      artistWrapWidth = 36;
+      isrcWrapWidth = 26;
+      addedWrapWidth = 32;
       langWrapWidth = 0;
     }
 
-    doc.setFillColor(29,185,84); doc.rect(mL,y,cW,8,'F');
-    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(255,255,255);
-    doc.text('#',cN,y+5.5); doc.text('Song',cS,y+5.5);
-    doc.text('Artists',cA,y+5.5); doc.text('ISRC',cI,y+5.5);
+    doc.setFillColor(29, 185, 84); doc.rect(mL, y, cW, 8, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(255, 255, 255);
+    doc.text('#', cN, y + 5.5); doc.text('Song', cS, y + 5.5);
+    doc.text('Artists', cA, y + 5.5); doc.text('ISRC', cI, y + 5.5);
+    doc.text('Added by', cAdd, y + 5.5);
     if (isAiOn) {
-      doc.text('Language',cLa,y+5.5);
+      doc.text('Language', cLa, y + 5.5);
     }
-    doc.text('Open',cOpen,y+5.5);
-    doc.text('Done',cDone,y+5.5);
+    doc.text('Open', cOpen, y + 5.5);
+    doc.text('Req', cReq, y + 5.5);
+    doc.text('Done', cDone, y + 5.5);
     y += 10;
 
     // Pre-fetch all album art thumbnails in parallel
@@ -1328,11 +1573,17 @@ async function exportToPDF() {
         langLines = doc.splitTextToSize(track.language || 'English', langWrapWidth);
       }
 
+      // Added by wrapping
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5);
+      const addedByVal = getAddedByDisplayName(track) || '—';
+      const addedByLines = doc.splitTextToSize(addedByVal, addedWrapWidth);
+
       // Calculate row height dynamically (min 11mm to always fit thumbnail)
       const songH = songLines.length * 3.2 + 3.5;
       const artistH = artistLines.length * 3.0 + 3.5;
+      const addedByH = addedByLines.length * 3.0 + 3.5;
       const langH = isAiOn ? (langLines.length * 2.8 + 3.5) : 0;
-      const rH = Math.max(thumbSize + 2, songH, artistH, langH);
+      const rH = Math.max(thumbSize + 2, songH, artistH, addedByH, langH);
 
       checkPage(rH + 2);
 
@@ -1360,7 +1611,7 @@ async function exportToPDF() {
       let songY = y + 5.0;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(20, 20, 40);
       songLines.forEach(line => {
-        doc.text(line, cS, songY);
+        doc.text(line, cS + thumbSize + 2, songY);
         songY += 3.2;
       });
 
@@ -1370,6 +1621,14 @@ async function exportToPDF() {
       artistLines.forEach(line => {
         doc.text(line, cA, artistY);
         artistY += 3.0;
+      });
+
+      // Draw Added by Lines
+      let addedByY = y + 5.0;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(80, 80, 100);
+      addedByLines.forEach(line => {
+        doc.text(line, cAdd, addedByY);
+        addedByY += 3.0;
       });
 
       if (isAiOn) {
@@ -1386,10 +1645,11 @@ async function exportToPDF() {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(7); doc.setTextColor(0, 150, 136);
       doc.text(track.isrc !== '—' ? track.isrc : '—', cI, y + (rH / 2) + 1);
 
-      // Draw compact Spotify open button and interactive done checkbox.
+      // Draw compact Spotify open button and interactive checkboxes.
       const actionY = y + (rH - 6) / 2;
       drawOpenTrackButton(doc, cOpen + 2, actionY, track.url);
-      addDoneCheckbox(doc, `done_track_${i + 1}`, cDone + 2, actionY, 6);
+      addPdfCheckbox(doc, `req_track_${i + 1}`, cReq + 2, actionY, 6, 234, 179, 8);
+      addPdfCheckbox(doc, `done_track_${i + 1}`, cDone + 2, actionY, 6, 29, 185, 8);
 
       // Draw cell separator line
       doc.setDrawColor(225, 228, 240); doc.setLineWidth(0.2);
@@ -1399,7 +1659,7 @@ async function exportToPDF() {
     }
 
     y += 6; checkPage(14);
-    doc.setFont('helvetica','italic'); doc.setFontSize(7.5); doc.setTextColor(160,160,180);
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.setTextColor(160, 160, 180);
     const disclaimerBlock = doc.splitTextToSize('Disclaimer: The track info, links and ISRCs are retrieved from public Spotify indexes. AI language detection is search-based and is a best-effort prediction that may contain inaccuracies. Save the PDF after ticking Done boxes to keep those marks next time you open it.', cW);
     doc.text(disclaimerBlock, mL, y);
 
@@ -1420,7 +1680,7 @@ async function exportToPDF() {
     showToast('Export failed. Please check console.');
   } finally {
     setLoading(false);
-    if (pdfBtn)  pdfBtn.disabled = false;
+    if (pdfBtn) pdfBtn.disabled = false;
     if (copyBtn) copyBtn.disabled = false;
   }
 }
