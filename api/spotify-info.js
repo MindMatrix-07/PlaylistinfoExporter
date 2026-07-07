@@ -31,6 +31,19 @@ const EMPTY_DETAILS = {
   albumName: 'Unknown Album'
 };
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Fetch with a hard timeout — aborts and throws if ms exceeded
+async function fetchWithTimeout(url, opts = {}, ms = 1000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function spotifyInfoHandler(req, res) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -149,11 +162,6 @@ async function spotifyInfoHandler(req, res) {
 
 module.exports = spotifyInfoHandler;
 
-// Helper: pause execution for given milliseconds
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function normalizeArtists(track) {
   const candidates = [
     track.artists,
@@ -234,7 +242,7 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     };
   }
 
-  // ── Step 1: Odesli → Deezer (primary — no rate limits) ──────────────────
+  // ── Step 1: Odesli → Deezer (primary — no rate limits, 1s timeout) ────────
   const deezerIsrc = await fetchOdesliDeezerISRC(trackUrl);
   if (deezerIsrc) {
     return {
@@ -246,48 +254,29 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     };
   }
 
-  // ── Step 2: Soundplate fallback (for tracks not on Deezer) ───────────────
+  // ── Step 2: Soundplate — 1 attempt, 1s timeout, no retry delays ─────────
   console.log(`[Fallback] Deezer miss — trying Soundplate for ${trackId || trackUrl}`);
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      if (attempt > 0) await sleep(4000 * attempt);
-
-      const resp = await fetch(
-        `${SOUNDPLATE_API}?q=${encodeURIComponent(trackUrl)}`,
-        { headers: SOUNDPLATE_HEADERS }
-      );
-      const data = await resp.json().catch(() => ({}));
-
-      if (resp.status === 429) {
-        if (attempt < maxAttempts - 1) {
-          await sleep(rateLimitSleepMs);
-          continue;
-        }
-        throw new Error(data.error || 'Soundplate rate limit exceeded');
-      }
-
-      if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
-      if (data.error) throw new Error(data.error);
-
-      if (data.isrc) {
-        return {
-          isrc: data.isrc,
-          albumArt: data.artwork_url || playlistImage,
-          albumName: data.album || 'Unknown Album',
-          trackUrl,
-          lookupStatus: 'soundplate_ok'
-        };
-      }
-
-      throw new Error('Soundplate returned no ISRC');
-    } catch (e) {
-      if (attempt === maxAttempts - 1) {
-        console.warn(`[Soundplate] Failed for ${trackId || trackUrl} after ${maxAttempts} attempts:`, e.message);
-      }
+  try {
+    const resp = await fetchWithTimeout(
+      `${SOUNDPLATE_API}?q=${encodeURIComponent(trackUrl)}`,
+      { headers: SOUNDPLATE_HEADERS },
+      3000
+    );
+    const data = await resp.json().catch(() => ({}));
+    if (data.isrc) {
+      return {
+        isrc: data.isrc,
+        albumArt: data.artwork_url || playlistImage,
+        albumName: data.album || 'Unknown Album',
+        trackUrl,
+        lookupStatus: 'soundplate_ok'
+      };
     }
+  } catch (e) {
+    console.warn(`[Soundplate] ${e.name === 'AbortError' ? 'Timed out' : e.message} — ${trackId || trackUrl}`);
   }
 
-  // ── Step 3: langlaisben Wix function (catches anything Deezer + Soundplate missed) ──
+  // ── Step 3: langlaisben Wix function — 1s timeout per request ───────────
   console.log(`[Fallback] Trying langlaisben for ${trackId || trackUrl}`);
   const wixIsrc = await fetchLanglaisbenISRC(trackUrl);
   if (wixIsrc) {
@@ -317,27 +306,28 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/
 
 async function fetchLanglaisbenISRC(spotifyTrackUrl) {
   try {
-    // Step 1: Visit page to get SSR session cookie
-    const pageRes = await fetch(LANGLAISBEN_COOKIE_URL, {
+    // Step 1: Visit page to get SSR session cookie (1s timeout)
+    const pageRes = await fetchWithTimeout(LANGLAISBEN_COOKIE_URL, {
       headers: { 'User-Agent': UA, 'Accept': 'text/html' }
-    });
+    }, 3000);
     const rawCookies = pageRes.headers.get('set-cookie') || '';
     const cookies = rawCookies.split(',')
       .map(c => c.split(';')[0].trim())
       .filter(Boolean)
       .join('; ');
 
-    // Step 2: Call ISRC function with cookie
+    // Step 2: Call ISRC function with cookie (1s timeout)
     const cleanUrl = spotifyTrackUrl.split('?')[0];
-    const fnRes = await fetch(
+    const fnRes = await fetchWithTimeout(
       `${LANGLAISBEN_FN_URL}?q=${encodeURIComponent(cleanUrl)}&type=track&limit=10`,
-      { headers: { 'Cookie': cookies, 'User-Agent': UA, 'Referer': LANGLAISBEN_COOKIE_URL } }
+      { headers: { 'Cookie': cookies, 'User-Agent': UA, 'Referer': LANGLAISBEN_COOKIE_URL } },
+      3000
     );
     if (!fnRes.ok) return null;
     const data = await fnRes.json().catch(() => null);
     return data?.tracks?.[0]?.isrc || null;
   } catch (e) {
-    console.warn('[Wix] langlaisben fetch failed:', e.message);
+    console.warn('[Wix] langlaisben fetch failed:', e.name === 'AbortError' ? 'Timed out' : e.message);
     return null;
   }
 }
@@ -346,10 +336,11 @@ async function fetchLanglaisbenISRC(spotifyTrackUrl) {
 // then fetches ISRC from Deezer's public track API (no auth required).
 async function fetchOdesliDeezerISRC(spotifyTrackUrl) {
   try {
-    // Step 1: Odesli lookup to get Deezer track ID
-    const odesliRes = await fetch(
+    // Step 1: Odesli lookup (1s timeout)
+    const odesliRes = await fetchWithTimeout(
       `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyTrackUrl)}`,
-      { headers: { 'User-Agent': 'PlaylistInfoExporter/2.0' } }
+      { headers: { 'User-Agent': 'PlaylistInfoExporter/2.0' } },
+      5000
     );
     if (!odesliRes.ok) return null;
     const odesliData = await odesliRes.json().catch(() => null);
@@ -360,13 +351,17 @@ async function fetchOdesliDeezerISRC(spotifyTrackUrl) {
     if (!deezerEntry) return null;
     const deezerId = deezerEntry[1].id;
 
-    // Step 2: Deezer public track API to get ISRC
-    const deezerRes = await fetch(`https://api.deezer.com/track/${deezerId}`);
+    // Step 2: Deezer track API (3s timeout)
+    const deezerRes = await fetchWithTimeout(
+      `https://api.deezer.com/track/${deezerId}`,
+      {},
+      3000
+    );
     if (!deezerRes.ok) return null;
     const deezerData = await deezerRes.json().catch(() => null);
     return deezerData?.isrc || null;
   } catch (e) {
-    console.warn('[Deezer] Odesli→Deezer failed:', e.message);
+    console.warn('[Deezer] Odesli→Deezer failed:', e.name === 'AbortError' ? 'Timed out' : e.message);
     return null;
   }
 }
