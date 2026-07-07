@@ -287,12 +287,59 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     }
   }
 
+  // ── Step 3: langlaisben Wix function (catches anything Deezer + Soundplate missed) ──
+  console.log(`[Fallback] Trying langlaisben for ${trackId || trackUrl}`);
+  const wixIsrc = await fetchLanglaisbenISRC(trackUrl);
+  if (wixIsrc) {
+    return {
+      isrc: wixIsrc,
+      albumArt: playlistImage,
+      albumName: 'Unknown Album',
+      trackUrl,
+      lookupStatus: 'wix_ok'
+    };
+  }
+
   return {
     ...EMPTY_DETAILS,
     albumArt: playlistImage,
     trackUrl,
     lookupStatus: 'no_isrc'
   };
+}
+
+// langlaisben.com Wix serverless function — uses their Spotify API integration.
+// No auth needed: just fetches the page first to obtain the SSR session cookie,
+// then calls their _functions/spotifyIsrcSearch endpoint.
+const LANGLAISBEN_COOKIE_URL = 'https://www.langlaisben.com/en/isrc-finder';
+const LANGLAISBEN_FN_URL = 'https://www.langlaisben.com/_functions/spotifyIsrcSearch';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36';
+
+async function fetchLanglaisbenISRC(spotifyTrackUrl) {
+  try {
+    // Step 1: Visit page to get SSR session cookie
+    const pageRes = await fetch(LANGLAISBEN_COOKIE_URL, {
+      headers: { 'User-Agent': UA, 'Accept': 'text/html' }
+    });
+    const rawCookies = pageRes.headers.get('set-cookie') || '';
+    const cookies = rawCookies.split(',')
+      .map(c => c.split(';')[0].trim())
+      .filter(Boolean)
+      .join('; ');
+
+    // Step 2: Call ISRC function with cookie
+    const cleanUrl = spotifyTrackUrl.split('?')[0];
+    const fnRes = await fetch(
+      `${LANGLAISBEN_FN_URL}?q=${encodeURIComponent(cleanUrl)}&type=track&limit=10`,
+      { headers: { 'Cookie': cookies, 'User-Agent': UA, 'Referer': LANGLAISBEN_COOKIE_URL } }
+    );
+    if (!fnRes.ok) return null;
+    const data = await fnRes.json().catch(() => null);
+    return data?.tracks?.[0]?.isrc || null;
+  } catch (e) {
+    console.warn('[Wix] langlaisben fetch failed:', e.message);
+    return null;
+  }
 }
 
 // Odesli → Deezer: resolves Spotify URL to Deezer ID via Odesli,
