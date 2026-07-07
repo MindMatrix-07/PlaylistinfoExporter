@@ -273,12 +273,54 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     }
   }
 
+  // Soundplate failed — try Odesli → Deezer fallback
+  console.log(`[Fallback] Trying Odesli→Deezer for ${trackId || trackUrl}`);
+  const deezerIsrc = await fetchOdesliDeezerISRC(trackUrl);
+  if (deezerIsrc) {
+    return {
+      isrc: deezerIsrc,
+      albumArt: playlistImage,
+      albumName: 'Unknown Album',
+      trackUrl,
+      lookupStatus: 'deezer_fallback'
+    };
+  }
+
   return {
     ...EMPTY_DETAILS,
     albumArt: playlistImage,
     trackUrl,
-    lookupStatus: 'soundplate_no_isrc'
+    lookupStatus: 'no_isrc'
   };
+}
+
+// Odesli → Deezer fallback: resolves Spotify URL to Deezer ID via Odesli,
+// then fetches ISRC from Deezer's public track API (no auth required).
+async function fetchOdesliDeezerISRC(spotifyTrackUrl) {
+  try {
+    // Step 1: Odesli lookup to get Deezer track ID
+    const odesliRes = await fetch(
+      `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyTrackUrl)}`,
+      { headers: { 'User-Agent': 'PlaylistInfoExporter/2.0' } }
+    );
+    if (!odesliRes.ok) return null;
+    const odesliData = await odesliRes.json().catch(() => null);
+    if (!odesliData) return null;
+
+    const entities = odesliData.entitiesByUniqueId || {};
+    const deezerEntry = Object.entries(entities).find(([key]) => key.startsWith('DEEZER_SONG::'));
+    if (!deezerEntry) return null;
+    const deezerId = deezerEntry[1].id;
+
+    // Step 2: Deezer public track API to get ISRC
+    const deezerRes = await fetch(`https://api.deezer.com/track/${deezerId}`);
+    if (!deezerRes.ok) return null;
+    const deezerData = await deezerRes.json().catch(() => null);
+    return deezerData?.isrc || null;
+  } catch (e) {
+    console.warn('[Fallback] Odesli→Deezer failed:', e.message);
+    return null;
+  }
 }
 
 function getTracksFromPlaylistData(playlistData) {
