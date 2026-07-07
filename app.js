@@ -268,18 +268,21 @@ function setFetchMode(mode) {
 
 function updateAuthUI() {
   const token = getToken();
+  const disclaimer = document.getElementById('premiumPlaylistDisclaimer');
 
   if (activeMode === 'premium') {
     document.getElementById('authCard').style.display     = token ? 'none'  : 'block';
     document.getElementById('playlistCard').style.display  = token ? 'block' : 'none';
     document.getElementById('connectedStatus').style.display  = token ? 'flex'  : 'none';
     document.getElementById('notConnectedBadge').style.display = token ? 'none' : 'inline-flex';
+    if (disclaimer) disclaimer.style.display = token ? 'flex' : 'none';
   } else {
     // Web fetch mode doesn't need auth card or connected status
     document.getElementById('authCard').style.display     = 'none';
     document.getElementById('playlistCard').style.display  = 'block';
     document.getElementById('connectedStatus').style.display  = 'none';
     document.getElementById('notConnectedBadge').style.display = 'inline-flex';
+    if (disclaimer) disclaimer.style.display = 'none';
   }
 
   // Restore saved clientId
