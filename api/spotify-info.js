@@ -234,6 +234,20 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     };
   }
 
+  // ── Step 1: Odesli → Deezer (primary — no rate limits) ──────────────────
+  const deezerIsrc = await fetchOdesliDeezerISRC(trackUrl);
+  if (deezerIsrc) {
+    return {
+      isrc: deezerIsrc,
+      albumArt: playlistImage,
+      albumName: 'Unknown Album',
+      trackUrl,
+      lookupStatus: 'deezer_ok'
+    };
+  }
+
+  // ── Step 2: Soundplate fallback (for tracks not on Deezer) ───────────────
+  console.log(`[Fallback] Deezer miss — trying Soundplate for ${trackId || trackUrl}`);
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       if (attempt > 0) await sleep(4000 * attempt);
@@ -261,29 +275,16 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
           albumArt: data.artwork_url || playlistImage,
           albumName: data.album || 'Unknown Album',
           trackUrl,
-          lookupStatus: 'ok'
+          lookupStatus: 'soundplate_ok'
         };
       }
 
       throw new Error('Soundplate returned no ISRC');
     } catch (e) {
       if (attempt === maxAttempts - 1) {
-        console.warn(`Failed for track ${trackId || trackUrl} after ${maxAttempts} attempts:`, e.message);
+        console.warn(`[Soundplate] Failed for ${trackId || trackUrl} after ${maxAttempts} attempts:`, e.message);
       }
     }
-  }
-
-  // Soundplate failed — try Odesli → Deezer fallback
-  console.log(`[Fallback] Trying Odesli→Deezer for ${trackId || trackUrl}`);
-  const deezerIsrc = await fetchOdesliDeezerISRC(trackUrl);
-  if (deezerIsrc) {
-    return {
-      isrc: deezerIsrc,
-      albumArt: playlistImage,
-      albumName: 'Unknown Album',
-      trackUrl,
-      lookupStatus: 'deezer_fallback'
-    };
   }
 
   return {
@@ -294,7 +295,7 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
   };
 }
 
-// Odesli → Deezer fallback: resolves Spotify URL to Deezer ID via Odesli,
+// Odesli → Deezer: resolves Spotify URL to Deezer ID via Odesli,
 // then fetches ISRC from Deezer's public track API (no auth required).
 async function fetchOdesliDeezerISRC(spotifyTrackUrl) {
   try {
@@ -318,7 +319,7 @@ async function fetchOdesliDeezerISRC(spotifyTrackUrl) {
     const deezerData = await deezerRes.json().catch(() => null);
     return deezerData?.isrc || null;
   } catch (e) {
-    console.warn('[Fallback] Odesli→Deezer failed:', e.message);
+    console.warn('[Deezer] Odesli→Deezer failed:', e.message);
     return null;
   }
 }
