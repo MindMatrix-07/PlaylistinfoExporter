@@ -693,10 +693,10 @@ async function exportToHTML() {
               <span class="album-name no-copy">${escHtml(track.album || '')}</span>
             </div>
           </td>
-          <td>${escHtml(track.artists)}</td>
-          <td><code>${escHtml(track.isrc || '-')}</code></td>
-          ${includeLanguageColumn ? `<td>${escHtml(track.language || '')}</td>` : ''}
-          <td><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
+          <td class="artists-cell">${escHtml(track.artists)}</td>
+          <td class="isrc-cell"><code>${escHtml(track.isrc || '-')}</code></td>
+          ${includeLanguageColumn ? `<td class="language-cell">${escHtml(track.language || '')}</td>` : ''}
+          <td class="link-cell"><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
           <td class="done-cell"><input type="checkbox" data-track-key="${escAttr(trackKey)}" aria-label="Mark ${escAttr(track.name)} done"></td>
         </tr>`;
     }).join('');
@@ -749,7 +749,64 @@ async function exportToHTML() {
     .num, .album-name { pointer-events: none; }
     .site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 18px 36px; }
     .site-footer a { color: var(--green); font-weight: 700; text-decoration: none; margin: 0 8px; }
-    @media (max-width: 760px) { table { font-size: 13px; } th:nth-child(4), td:nth-child(4) { display:none; } ${includeLanguageColumn ? 'th:nth-child(5), td:nth-child(5) { display:none; }' : ''} .head { grid-template-columns: auto 1fr; align-items:flex-start; } .spotify-mark { display:none; } }
+    @media (max-width: 760px) {
+      .head { grid-template-columns: auto 1fr; align-items:flex-start; }
+      .spotify-mark { display:none; }
+      .toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+      .toolbar-actions { width: 100%; }
+      .toolbar-actions button { flex: 1; text-align: center; justify-content: center; }
+      table { border: none !important; background: transparent !important; box-shadow: none !important; }
+      thead { display: none !important; }
+      tbody { display: flex; flex-direction: column; gap: 12px; }
+      tr {
+        display: grid !important;
+        grid-template-columns: 28px auto auto 1fr auto;
+        grid-template-rows: auto auto auto auto;
+        gap: 6px 10px;
+        padding: 12px 14px !important;
+        background: var(--panel) !important;
+        border: 1px solid var(--line) !important;
+        border-radius: 8px !important;
+        align-items: center;
+      }
+      tr.done {
+        background: var(--panel) !important;
+        opacity: 0.8;
+        border-color: var(--green) !important;
+      }
+      .num { grid-column: 1; grid-row: 1; text-align: center; }
+      .song { grid-column: 2 / span 3; grid-row: 1; min-width: 0 !important; }
+      .link-cell { grid-column: 5; grid-row: 1; justify-self: end; }
+      .artists-cell {
+        grid-column: 2 / span 4;
+        grid-row: 2;
+        padding: 0 !important;
+        border: none !important;
+      }
+      .isrc-cell {
+        grid-column: 2;
+        grid-row: 4;
+        padding: 0 !important;
+        border: none !important;
+        display: flex;
+        align-items: center;
+      }
+      .language-cell {
+        grid-column: 3;
+        grid-row: 4;
+        padding: 0 !important;
+        border: none !important;
+        display: flex;
+        align-items: center;
+      }
+      .done-cell {
+        grid-column: 5;
+        grid-row: 4;
+        justify-self: end;
+        padding: 0 !important;
+        border: none !important;
+      }
+    }
   </style>
 </head>
 <body>
