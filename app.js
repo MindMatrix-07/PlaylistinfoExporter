@@ -163,6 +163,49 @@ function getToken() {
   return (token && Date.now() < expiry) ? token : null;
 }
 
+// ─── Token Refresh ────────────────────────────
+// Silently exchanges the stored refresh_token for a fresh access token.
+// Returns the new access token string, or null on failure.
+async function refreshAccessToken() {
+  const refreshToken = localStorage.getItem('sp_refresh');
+  const clientId     = localStorage.getItem('sp_client_id');
+  if (!refreshToken || !clientId) return null;
+
+  try {
+    const resp = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type:    'refresh_token',
+        refresh_token: refreshToken,
+        client_id:     clientId,
+      }),
+    });
+    if (!resp.ok) {
+      console.warn('[Auth] Token refresh failed:', resp.status);
+      return null;
+    }
+    const data = await resp.json();
+    localStorage.setItem('sp_token',  data.access_token);
+    localStorage.setItem('sp_expiry', String(Date.now() + data.expires_in * 1000));
+    // Spotify may rotate the refresh token
+    if (data.refresh_token) localStorage.setItem('sp_refresh', data.refresh_token);
+    console.log('[Auth] Access token silently refreshed.');
+    return data.access_token;
+  } catch (err) {
+    console.warn('[Auth] Token refresh error:', err.message);
+    return null;
+  }
+}
+
+// Returns a valid token: uses the cached one if fresh, otherwise tries
+// a silent refresh. Returns null if both fail (user must log in again).
+async function getOrRefreshToken() {
+  const cached = getToken();
+  if (cached) return cached;
+  return refreshAccessToken();
+}
+
 function disconnectSpotify() {
   ['sp_token','sp_expiry','sp_refresh','sp_client_id'].forEach(k => localStorage.removeItem(k));
   updateAuthUI();
@@ -633,8 +676,10 @@ async function fetchPlaylist() {
     }
   } else {
     // SPOTIFY PREMIUM MODE (PKCE Access Flow)
-    const token = getToken();
+    setLoading(true, 'Checking Spotify session…');
+    let token = await getOrRefreshToken();
     if (!token) {
+      setLoading(false);
       showError('Session expired — please reconnect Spotify.', 'errorBox2');
       disconnectSpotify();
       setFetchBtn(false);
@@ -701,10 +746,26 @@ async function fetchPlaylist() {
 
     } catch (err) {
       setLoading(false);
-      if (isSpotifyForbiddenError(err)) {
+
+      // On 403/401, try a silent token refresh and retry the whole fetch once
+      if (isSpotifyForbiddenError(err) || err?.status === 401) {
+        setLoading(true, 'Token expired — refreshing session…');
+        const newToken = await refreshAccessToken();
+        setLoading(false);
+
+        if (newToken) {
+          // Re-invoke fetchPlaylist with the fresh token now in localStorage
+          showToast('Session refreshed — retrying…');
+          setFetchBtn(false);
+          fetchPlaylist();
+          return;
+        }
+
+        // Refresh failed — show error with Web Fetch fallback
         showSpotifyApiError(err, rawUrl);
         return;
       }
+
       showError(err.message || 'Something went wrong.', 'errorBox2');
     } finally {
       setFetchBtn(false);
