@@ -1509,33 +1509,33 @@ async function exportToPDF() {
 
     if (isAiOn) {
       cN = mL;
-      cS = mL + 6;
-      cA = mL + 42;
-      cI = mL + 78;
-      cAdd = mL + 106;
-      cLa = mL + 130;
-      cOpen = mL + 154;
-      cReq = mL + 167;
-      cDone = mL + 180;
-      songWrapWidth = 32;
-      artistWrapWidth = 32;
-      isrcWrapWidth = 24;
+      cS = 31;
+      cA = 61;
+      cI = 89;
+      cAdd = 113;
+      cLa = 135;
+      cOpen = 155;
+      cReq = 168;
+      cDone = 181;
+      songWrapWidth = 28;
+      artistWrapWidth = 26;
+      isrcWrapWidth = 22;
       addedWrapWidth = 20;
-      langWrapWidth = 20;
+      langWrapWidth = 18;
     } else {
       cN = mL;
-      cS = mL + 6;
-      cA = mL + 48;
-      cI = mL + 88;
-      cAdd = mL + 118;
+      cS = 31;
+      cA = 69;
+      cI = 103;
+      cAdd = 129;
       cLa = null;
-      cOpen = mL + 154;
-      cReq = mL + 167;
-      cDone = mL + 180;
-      songWrapWidth = 38;
-      artistWrapWidth = 36;
-      isrcWrapWidth = 26;
-      addedWrapWidth = 32;
+      cOpen = 155;
+      cReq = 168;
+      cDone = 181;
+      songWrapWidth = 36;
+      artistWrapWidth = 32;
+      isrcWrapWidth = 24;
+      addedWrapWidth = 24;
       langWrapWidth = 0;
     }
 
@@ -1547,9 +1547,9 @@ async function exportToPDF() {
     if (isAiOn) {
       doc.text('Language', cLa, y + 5.5);
     }
-    doc.text('Open', cOpen, y + 5.5);
-    doc.text('Req', cReq, y + 5.5);
-    doc.text('Done', cDone, y + 5.5);
+    doc.text('Open', cOpen + 3, y + 5.5);
+    doc.text('Req', cReq + 3, y + 5.5);
+    doc.text('Done', cDone + 3.5, y + 5.5);
     y += 10;
 
     // Pre-fetch all album art thumbnails in parallel
@@ -1598,7 +1598,7 @@ async function exportToPDF() {
       doc.text(String(i + 1), cN, y + 5.5);
 
       // Draw album art thumbnail
-      const thumbX = mL + 5;
+      const thumbX = mL + 4;
       const thumbY = y + (rH - thumbSize) / 2;
       if (thumbData) {
         doc.addImage(thumbData, 'JPEG', thumbX, thumbY, thumbSize, thumbSize);
@@ -1611,7 +1611,7 @@ async function exportToPDF() {
       let songY = y + 5.0;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(20, 20, 40);
       songLines.forEach(line => {
-        doc.text(line, cS + thumbSize + 2, songY);
+        doc.text(line, cS, songY);
         songY += 3.2;
       });
 
@@ -1647,9 +1647,9 @@ async function exportToPDF() {
 
       // Draw compact Spotify open button and interactive checkboxes.
       const actionY = y + (rH - 6) / 2;
-      drawOpenTrackButton(doc, cOpen + 2, actionY, track.url);
-      addPdfCheckbox(doc, `req_track_${i + 1}`, cReq + 2, actionY, 6, 234, 179, 8);
-      addPdfCheckbox(doc, `done_track_${i + 1}`, cDone + 2, actionY, 6, 29, 185, 8);
+      drawOpenTrackButton(doc, cOpen + 3, actionY, track.url);
+      addPdfCheckbox(doc, `req_track_${i + 1}`, cReq + 3, actionY, 6, 234, 179, 8);
+      addPdfCheckbox(doc, `done_track_${i + 1}`, cDone + 3.5, actionY, 6, 29, 185, 8);
 
       // Draw cell separator line
       doc.setDrawColor(225, 228, 240); doc.setLineWidth(0.2);
