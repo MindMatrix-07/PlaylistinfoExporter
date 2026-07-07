@@ -727,23 +727,13 @@ async function resolveWebFetchTrackDetails() {
 
   showToast(`Fetching ISRCs for ${pending.length} track${pending.length === 1 ? '' : 's'}...`, 3500);
 
-  const slowLookupThresholdMs = 2000;
-  const slowLookupPauseMs = 15000;
   let completed = 0;
   setLoading(true, `Fetching ISRCs (0 / ${pending.length})...`);
 
   for (const item of pending) {
-    const startedAt = Date.now();
     await resolveOneWebFetchTrack(item.track, item.index);
-    const elapsedMs = Date.now() - startedAt;
-
     completed++;
     setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
-
-    if (elapsedMs > slowLookupThresholdMs && completed < pending.length) {
-      setLoading(true, `Slow ISRC lookup detected. Waiting 15 seconds before continuing (${completed} / ${pending.length})...`);
-      await sleep(slowLookupPauseMs);
-    }
   }
 
   await enrichMissingPreviewUrls();
