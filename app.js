@@ -609,7 +609,7 @@ async function fetchAllAlbumTracks(token, albumData, onProgress) {
 
 // ─── Main Fetch Handler ───────────────────────
 
-async function fetchPlaylist() {
+async function fetchPlaylist(_retried = false) {
   hideError('errorBox2');
   const rawUrl = document.getElementById('playlistUrl').value.trim();
 
@@ -747,21 +747,29 @@ async function fetchPlaylist() {
     } catch (err) {
       setLoading(false);
 
-      // On 403/401, try a silent token refresh and retry the whole fetch once
-      if (isSpotifyForbiddenError(err) || err?.status === 401) {
+      // On 403/401, attempt a one-time silent token refresh then retry.
+      // _retried guards against infinite loops — if the 403 persists after
+      // the refresh (e.g. the playlist itself is forbidden), we stop here.
+      if (!_retried && (isSpotifyForbiddenError(err) || err?.status === 401)) {
         setLoading(true, 'Token expired — refreshing session…');
         const newToken = await refreshAccessToken();
         setLoading(false);
 
         if (newToken) {
-          // Re-invoke fetchPlaylist with the fresh token now in localStorage
+          // Retry exactly once with the fresh token
           showToast('Session refreshed — retrying…');
           setFetchBtn(false);
-          fetchPlaylist();
+          fetchPlaylist(true); // pass _retried=true to block further retries
           return;
         }
 
-        // Refresh failed — show error with Web Fetch fallback
+        // Refresh itself failed — show error + Web Fetch fallback
+        showSpotifyApiError(err, rawUrl);
+        return;
+      }
+
+      // 403 after a retry, or any other error
+      if (isSpotifyForbiddenError(err) || err?.status === 401) {
         showSpotifyApiError(err, rawUrl);
         return;
       }
