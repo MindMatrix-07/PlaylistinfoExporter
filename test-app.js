@@ -762,11 +762,11 @@ async function exportToHTML() {
         display: grid !important;
         grid-template-columns: 28px auto auto 1fr auto;
         grid-template-rows: auto auto auto auto;
-        gap: 6px 10px;
-        padding: 12px 14px !important;
+        gap: 8px 10px;
+        padding: 14px 16px !important;
         background: var(--panel) !important;
         border: 1px solid var(--line) !important;
-        border-radius: 8px !important;
+        border-radius: 12px !important;
         align-items: center;
       }
       tr.done {
@@ -774,28 +774,43 @@ async function exportToHTML() {
         opacity: 0.8;
         border-color: var(--green) !important;
       }
-      .num { grid-column: 1; grid-row: 1; text-align: center; }
-      .song { grid-column: 2 / span 3; grid-row: 1; min-width: 0 !important; }
+      td {
+        border: none !important;
+        padding: 0 !important;
+      }
+      .num { grid-column: 1; grid-row: 1; text-align: center; color: var(--muted); font-weight: 600; }
+      .song {
+        grid-column: 2 / span 3;
+        grid-row: 1;
+        min-width: 0 !important;
+        display: flex !important;
+        align-items: center;
+        gap: 12px;
+      }
+      .song > div {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
       .link-cell { grid-column: 5; grid-row: 1; justify-self: end; }
       .artists-cell {
         grid-column: 2 / span 4;
         grid-row: 2;
-        padding: 0 !important;
-        border: none !important;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.4;
       }
       .isrc-cell {
         grid-column: 2;
         grid-row: 4;
-        padding: 0 !important;
-        border: none !important;
         display: flex;
         align-items: center;
       }
       .language-cell {
         grid-column: 3;
         grid-row: 4;
-        padding: 0 !important;
-        border: none !important;
         display: flex;
         align-items: center;
       }
@@ -803,8 +818,8 @@ async function exportToHTML() {
         grid-column: 5;
         grid-row: 4;
         justify-self: end;
-        padding: 0 !important;
-        border: none !important;
+        display: flex;
+        align-items: center;
       }
     }
   </style>

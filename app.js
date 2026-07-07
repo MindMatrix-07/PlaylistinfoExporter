@@ -12,7 +12,7 @@ let activeResultsPreviewButton = null;
 // Heuristic Language Detector
 function detectLanguage(title, isrc) {
   if (!title) return 'English';
-  
+
   // 1. Unicode script detections
   if (/[\uac00-\ud7af]/.test(title)) return 'Korean';
   if (/[\u3040-\u30ff\u31f0-\u31ff]/.test(title)) return 'Japanese';
@@ -88,27 +88,27 @@ async function connectSpotify() {
   const clientId = document.getElementById('clientId').value.trim();
   if (!clientId) { showError('Please enter your Spotify Client ID first.'); return; }
 
-  const verifier  = await generateCodeVerifier();
+  const verifier = await generateCodeVerifier();
   const challenge = await generateCodeChallenge(verifier);
 
-  localStorage.setItem('sp_verifier',  verifier);
+  localStorage.setItem('sp_verifier', verifier);
   localStorage.setItem('sp_client_id', clientId);
 
   const params = new URLSearchParams({
-    client_id:             clientId,
-    response_type:         'code',
-    redirect_uri:          REDIRECT_URI,
+    client_id: clientId,
+    response_type: 'code',
+    redirect_uri: REDIRECT_URI,
     code_challenge_method: 'S256',
-    code_challenge:        challenge,
-    scope:                 SCOPES,
+    code_challenge: challenge,
+    scope: SCOPES,
   });
   window.location.href = `https://accounts.spotify.com/authorize?${params}`;
 }
 
 async function handleCallback() {
   const params = new URLSearchParams(window.location.search);
-  const code   = params.get('code');
-  const error  = params.get('error');
+  const code = params.get('code');
+  const error = params.get('error');
 
   if (error) {
     showError('Spotify denied access: ' + error);
@@ -131,10 +131,10 @@ async function handleCallback() {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id:     clientId,
-        grant_type:    'authorization_code',
+        client_id: clientId,
+        grant_type: 'authorization_code',
         code,
-        redirect_uri:  REDIRECT_URI,
+        redirect_uri: REDIRECT_URI,
         code_verifier: verifier,
       }),
     });
@@ -145,8 +145,8 @@ async function handleCallback() {
     }
 
     const data = await resp.json();
-    localStorage.setItem('sp_token',   data.access_token);
-    localStorage.setItem('sp_expiry',  String(Date.now() + data.expires_in * 1000));
+    localStorage.setItem('sp_token', data.access_token);
+    localStorage.setItem('sp_expiry', String(Date.now() + data.expires_in * 1000));
     if (data.refresh_token) localStorage.setItem('sp_refresh', data.refresh_token);
     localStorage.removeItem('sp_verifier');
 
@@ -158,7 +158,7 @@ async function handleCallback() {
 }
 
 function getToken() {
-  const token  = localStorage.getItem('sp_token');
+  const token = localStorage.getItem('sp_token');
   const expiry = parseInt(localStorage.getItem('sp_expiry') || '0');
   return (token && Date.now() < expiry) ? token : null;
 }
@@ -168,7 +168,7 @@ function getToken() {
 // Returns the new access token string, or null on failure.
 async function refreshAccessToken() {
   const refreshToken = localStorage.getItem('sp_refresh');
-  const clientId     = localStorage.getItem('sp_client_id');
+  const clientId = localStorage.getItem('sp_client_id');
   if (!refreshToken || !clientId) return null;
 
   try {
@@ -176,9 +176,9 @@ async function refreshAccessToken() {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        grant_type:    'refresh_token',
+        grant_type: 'refresh_token',
         refresh_token: refreshToken,
-        client_id:     clientId,
+        client_id: clientId,
       }),
     });
     if (!resp.ok) {
@@ -186,7 +186,7 @@ async function refreshAccessToken() {
       return null;
     }
     const data = await resp.json();
-    localStorage.setItem('sp_token',  data.access_token);
+    localStorage.setItem('sp_token', data.access_token);
     localStorage.setItem('sp_expiry', String(Date.now() + data.expires_in * 1000));
     // Spotify may rotate the refresh token
     if (data.refresh_token) localStorage.setItem('sp_refresh', data.refresh_token);
@@ -228,7 +228,7 @@ async function getOrRefreshToken() {
 }
 
 function disconnectSpotify() {
-  ['sp_token','sp_expiry','sp_refresh','sp_client_id','sp_user_id','sp_user_name'].forEach(k => localStorage.removeItem(k));
+  ['sp_token', 'sp_expiry', 'sp_refresh', 'sp_client_id', 'sp_user_id', 'sp_user_name'].forEach(k => localStorage.removeItem(k));
   updateAuthUI();
 }
 
@@ -271,16 +271,16 @@ function updateAuthUI() {
   const disclaimer = document.getElementById('premiumPlaylistDisclaimer');
 
   if (activeMode === 'premium') {
-    document.getElementById('authCard').style.display     = token ? 'none'  : 'block';
-    document.getElementById('playlistCard').style.display  = token ? 'block' : 'none';
-    document.getElementById('connectedStatus').style.display  = token ? 'flex'  : 'none';
+    document.getElementById('authCard').style.display = token ? 'none' : 'block';
+    document.getElementById('playlistCard').style.display = token ? 'block' : 'none';
+    document.getElementById('connectedStatus').style.display = token ? 'flex' : 'none';
     document.getElementById('notConnectedBadge').style.display = token ? 'none' : 'inline-flex';
     if (disclaimer) disclaimer.style.display = token ? 'flex' : 'none';
   } else {
     // Web fetch mode doesn't need auth card or connected status
-    document.getElementById('authCard').style.display     = 'none';
-    document.getElementById('playlistCard').style.display  = 'block';
-    document.getElementById('connectedStatus').style.display  = 'none';
+    document.getElementById('authCard').style.display = 'none';
+    document.getElementById('playlistCard').style.display = 'block';
+    document.getElementById('connectedStatus').style.display = 'none';
     document.getElementById('notConnectedBadge').style.display = 'inline-flex';
     if (disclaimer) disclaimer.style.display = 'none';
   }
@@ -305,7 +305,7 @@ function showError(msg, boxId = 'errorBox') {
 
 function showSpotifyApiError(err, rawUrl, playlistOwnerId = null, currentUserId = null) {
   const details = formatSpotifyErrorDetails(err);
-  
+
   let customExplanation = '';
   if (err?.status === 403 || isSpotifyForbiddenError(err)) {
     if (playlistOwnerId && currentUserId && playlistOwnerId !== currentUserId) {
@@ -391,12 +391,12 @@ function extractSpotifyItem(input) {
 function mapSpotifyTrack(t, fallbackAlbum = {}, options = {}) {
   const album = t.album || fallbackAlbum || {};
   return {
-    name:    t.name    || 'Unknown',
+    name: t.name || 'Unknown',
     artists: (t.artists || []).map(a => a.name).join(', '),
-    album:   album.name || '',
+    album: album.name || '',
     albumArt: album.images?.[album.images.length - 1]?.url || album.images?.[0]?.url || '',
-    url:     t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
-    isrc:    t.external_ids?.isrc || '—',
+    url: t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
+    isrc: t.external_ids?.isrc || '—',
     previewUrl: t.preview_url || '',
     addedBy: options.addedBy || null,
     language: ''
@@ -687,7 +687,7 @@ async function fetchPlaylist(_retried = false) {
         const errJson = await resp.json().catch(() => ({}));
         throw new Error(errJson.error || `HTTP ${resp.status}`);
       }
-      
+
       const resData = await resp.json();
       playlistData = {
         name: resData.name,
@@ -905,7 +905,7 @@ function updateRenderedTrackDetails(track, index) {
 
 function renderResults() {
   const meta = document.getElementById('playlistMeta');
-  const img  = playlistData.images?.[0]?.url;
+  const img = playlistData.images?.[0]?.url;
   meta.innerHTML = `
     ${img
       ? `<img class="playlist-cover" src="${img}" alt="Cover" />`
@@ -1075,15 +1075,13 @@ async function exportToHTML() {
       const addedBy = track.addedBy || {};
       const addedByLabel = addedBy.name && addedBy.name !== addedBy.id ? addedBy.name : 'Spotify profile';
       const addedByMarkup = includeAddedByColumn
-        ? `<td class="added-by-cell">${
-            addedBy.id
-              ? `<a class="added-by" href="${escAttr(addedBy.url || '#')}" target="_blank" rel="noopener" title="${escAttr(addedBy.name || addedBy.id)}">${
-                  addedBy.image
-                    ? `<img class="no-copy added-by-avatar" src="${escAttr(addedBy.image)}" alt="" draggable="false">`
-                    : '<span class="added-by-avatar added-by-fallback no-copy" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/></svg></span>'
-                }<span class="added-by-name">${escHtml(addedByLabel)}</span></a>`
-              : '<span class="added-by-empty">—</span>'
-          }</td>`
+        ? `<td class="added-by-cell">${addedBy.id
+          ? `<a class="added-by" href="${escAttr(addedBy.url || '#')}" target="_blank" rel="noopener" title="${escAttr(addedBy.name || addedBy.id)}">${addedBy.image
+            ? `<img class="no-copy added-by-avatar" src="${escAttr(addedBy.image)}" alt="" draggable="false">`
+            : '<span class="added-by-avatar added-by-fallback no-copy" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/></svg></span>'
+          }<span class="added-by-name">${escHtml(addedByLabel)}</span></a>`
+          : '<span class="added-by-empty">—</span>'
+        }</td>`
         : '';
       return `
         <tr>
@@ -1179,11 +1177,11 @@ async function exportToHTML() {
         display: grid !important;
         grid-template-columns: 28px auto auto 1fr auto;
         grid-template-rows: auto auto auto auto;
-        gap: 6px 10px;
-        padding: 12px 14px !important;
+        gap: 8px 10px;
+        padding: 14px 16px !important;
         background: var(--panel) !important;
         border: 1px solid var(--line) !important;
-        border-radius: 8px !important;
+        border-radius: 12px !important;
         align-items: center;
       }
       tr.done {
@@ -1191,34 +1189,47 @@ async function exportToHTML() {
         opacity: 0.8;
         border-color: var(--green) !important;
       }
-      .num { grid-column: 1; grid-row: 1; text-align: center; }
-      .song { grid-column: 2 / span 3; grid-row: 1; min-width: 0 !important; }
+      td {
+        border: none !important;
+        padding: 0 !important;
+      }
+      .num { grid-column: 1; grid-row: 1; text-align: center; color: var(--muted); font-weight: 600; }
+      .song {
+        grid-column: 2 / span 3;
+        grid-row: 1;
+        min-width: 0 !important;
+        display: flex !important;
+        align-items: center;
+        gap: 12px;
+      }
+      .song > div {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
       .link-cell { grid-column: 5; grid-row: 1; justify-self: end; }
       .artists-cell {
         grid-column: 2 / span 4;
         grid-row: 2;
-        padding: 0 !important;
-        border: none !important;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.4;
       }
       .added-by-cell {
         grid-column: 2 / span 4;
         grid-row: 3;
-        padding: 0 !important;
-        border: none !important;
       }
       .isrc-cell {
         grid-column: 2;
         grid-row: 4;
-        padding: 0 !important;
-        border: none !important;
         display: flex;
         align-items: center;
       }
       .language-cell {
         grid-column: 3;
         grid-row: 4;
-        padding: 0 !important;
-        border: none !important;
         display: flex;
         align-items: center;
       }
@@ -1226,8 +1237,8 @@ async function exportToHTML() {
         grid-column: 5;
         grid-row: 4;
         justify-self: end;
-        padding: 0 !important;
-        border: none !important;
+        display: flex;
+        align-items: center;
       }
     }
   </style>
@@ -1644,10 +1655,10 @@ function addDoneCheckbox(doc, fieldName, x, y, size) {
 async function exportToPDF() {
   if (!allTracks.length || !playlistData) return;
 
-  const pdfBtn  = document.getElementById('pdfBtn');
+  const pdfBtn = document.getElementById('pdfBtn');
   const copyBtn = document.getElementById('copyBtn');
 
-  if (pdfBtn)  pdfBtn.disabled = true;
+  if (pdfBtn) pdfBtn.disabled = true;
   if (copyBtn) copyBtn.disabled = true;
 
   try {
@@ -1673,7 +1684,7 @@ async function exportToPDF() {
       doc.setFillColor(248, 250, 252); doc.rect(0, 0, pageW, 24, 'F');
       doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(29, 185, 84);
       doc.text('Playlist Info Exporter', mL, 15);
-      
+
       const plLabel = playlistData.name.slice(0, 32) + (playlistData.name.length > 32 ? '…' : '');
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(140, 140, 160);
       const rightTextWidth = doc.getTextWidth(plLabel);
@@ -1746,7 +1757,7 @@ async function exportToPDF() {
 
     // ─── TRACKS PAGE ──────────────────────────────
     doc.addPage(); drawHeader(); y = 32;
-    doc.setFont('helvetica','bold'); doc.setFontSize(13); doc.setTextColor(20,20,40);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(20, 20, 40);
     doc.text('Track List', mL, y); y += 8;
 
     const aiModeCheckbox = document.getElementById('aiModeCheckbox');
@@ -1783,15 +1794,15 @@ async function exportToPDF() {
       langWrapWidth = 0;
     }
 
-    doc.setFillColor(29,185,84); doc.rect(mL,y,cW,8,'F');
-    doc.setFont('helvetica','bold'); doc.setFontSize(7.5); doc.setTextColor(255,255,255);
-    doc.text('#',cN,y+5.5); doc.text('Song',cS,y+5.5);
-    doc.text('Artists',cA,y+5.5); doc.text('ISRC',cI,y+5.5);
+    doc.setFillColor(29, 185, 84); doc.rect(mL, y, cW, 8, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(255, 255, 255);
+    doc.text('#', cN, y + 5.5); doc.text('Song', cS, y + 5.5);
+    doc.text('Artists', cA, y + 5.5); doc.text('ISRC', cI, y + 5.5);
     if (isAiOn) {
-      doc.text('Language',cLa,y+5.5);
+      doc.text('Language', cLa, y + 5.5);
     }
-    doc.text('Open',cOpen,y+5.5);
-    doc.text('Done',cDone,y+5.5);
+    doc.text('Open', cOpen, y + 5.5);
+    doc.text('Done', cDone, y + 5.5);
     y += 10;
 
     // Pre-fetch all album art thumbnails in parallel
@@ -1886,7 +1897,7 @@ async function exportToPDF() {
     }
 
     y += 6; checkPage(14);
-    doc.setFont('helvetica','italic'); doc.setFontSize(7.5); doc.setTextColor(160,160,180);
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.setTextColor(160, 160, 180);
     const disclaimerBlock = doc.splitTextToSize('Disclaimer: The track info, links and ISRCs are retrieved from public Spotify indexes. AI language detection is search-based and is a best-effort prediction that may contain inaccuracies. Save the PDF after ticking Done boxes to keep those marks next time you open it.', cW);
     doc.text(disclaimerBlock, mL, y);
 
@@ -1907,7 +1918,7 @@ async function exportToPDF() {
     showToast('Export failed. Please check console.');
   } finally {
     setLoading(false);
-    if (pdfBtn)  pdfBtn.disabled = false;
+    if (pdfBtn) pdfBtn.disabled = false;
     if (copyBtn) copyBtn.disabled = false;
   }
 }
@@ -2166,7 +2177,7 @@ async function startGoogleAiLanguageDetection() {
 
   aiDetectionInProgress = false;
   addAiDebugLog('page', 'Language scan finished');
-  
+
   // Re-enable buttons
   const cb = document.getElementById('aiModeCheckbox');
   if (cb && cb.checked) {
