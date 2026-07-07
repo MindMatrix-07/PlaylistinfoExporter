@@ -870,6 +870,9 @@ body {
   .bg-orb {
     display: none !important;
   }
+  .track-album {
+    display: none !important;
+  }
 
   .credentials-grid { grid-template-columns: 1fr; }
 

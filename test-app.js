@@ -792,7 +792,11 @@ async function exportToHTML() {
         min-width: 0;
         display: flex;
         flex-direction: column;
+        justify-content: center;
         gap: 3px;
+      }
+      .album-name {
+        display: none !important;
       }
       .link-cell { grid-column: 5; grid-row: 1; justify-self: end; }
       .artists-cell {
