@@ -935,10 +935,9 @@ body {
   }
 
   .track-row {
-    grid-template-columns: 28px auto auto 1fr auto !important;
-    grid-template-rows: auto auto auto;
-    grid-template-areas: none !important;
-    gap: 8px 10px !important;
+    grid-template-columns: 28px auto 1fr auto !important;
+    grid-template-rows: auto auto auto auto;
+    gap: 6px 10px !important;
     padding: 14px 16px !important;
     align-items: center;
   }
@@ -951,13 +950,13 @@ body {
   }
 
   .col-title {
-    grid-column: 2 / span 3;
+    grid-column: 2 / span 2;
     grid-row: 1;
     min-width: 0;
   }
 
   .col-link {
-    grid-column: 5;
+    grid-column: 4;
     grid-row: 1;
     display: flex;
     justify-content: flex-end;
@@ -972,7 +971,7 @@ body {
 
   .col-artists {
     display: block !important;
-    grid-column: 2 / span 4;
+    grid-column: 2 / span 3;
     grid-row: 2;
     font-size: 0.82rem;
     color: var(--text-secondary);
@@ -994,6 +993,13 @@ body {
     align-self: center;
   }
 
+  .col-added-by {
+    display: flex !important;
+    grid-column: 2 / span 3;
+    grid-row: 4;
+    align-self: center;
+  }
+
   .setup-card { padding: 24px 20px; }
   .setup-title h1 { font-size: 1.4rem; }
 
@@ -1003,6 +1009,57 @@ body {
 
   .track-album {
     font-size: 0.74rem;
+  }
+
+  /* ===== Mobile sticky action rail ===== */
+  .results-toolbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 90;
+    background: rgba(10, 10, 15, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    margin: 0 -14px;
+    padding: 10px 14px;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .track-count {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    width: auto;
+  }
+
+  .toolbar-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .toolbar-actions button {
+    flex: none;
+    justify-content: center;
+    padding: 10px 6px;
+    font-size: 0.78rem;
+    border-radius: 12px;
+    gap: 5px;
+  }
+
+  .toolbar-actions button .btn-text {
+    display: block;
+  }
+
+  .toolbar-actions button svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
   }
 }
 
@@ -1072,18 +1129,18 @@ body {
     font-size: 0.78rem;
   }
 
-  .track-count {
-    width: 100%;
-  }
-
   .toolbar-actions {
-    gap: 8px;
+    gap: 6px;
   }
 
-  .btn-secondary,
-  .btn-primary {
-    flex: 1 1 100%;
-    padding: 11px 12px;
+  .toolbar-actions button {
+    padding: 9px 4px;
+    font-size: 0.73rem;
+    border-radius: 10px;
+  }
+
+  .track-count {
+    font-size: 0.77rem;
   }
 
   .track-row {

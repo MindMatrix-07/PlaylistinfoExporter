@@ -759,7 +759,7 @@ async function exportToHTML() {
           </td>
           <td class="artists-cell">${escHtml(track.artists)}</td>
           <td class="isrc-cell"><code>${escHtml(track.isrc || '-')}</code></td>
-          <td class="added-by-cell"><button class="copy-text added-by-copy" type="button" data-track-key="${escAttr(trackKey)}" data-copy="${escAttr(addedByVal)}">${escHtml(addedByVal || '—')}</button></td>
+          <td class="added-by-cell"><button class="copy-text added-by-copy" type="button" data-track-key="${escAttr(trackKey)}" data-copy="${escAttr(addedByVal)}">${escHtml(addedByVal || '—')}</button><span class="added-by-hint" aria-hidden="true"> ✏ tap×2</span></td>
           ${includeLanguageColumn ? `<td class="language-cell">${escHtml(track.language || '')}</td>` : ''}
           <td class="link-cell"><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
           <td class="requested-cell"><input type="checkbox" class="requested-checkbox" data-requested-key="${escAttr(trackKey)}" aria-label="Mark ${escAttr(track.name)} requested"></td>
@@ -821,6 +821,11 @@ async function exportToHTML() {
     .requested-cell, .done-cell { text-align: center; width: 64px; }
     input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--green); cursor: pointer; }
     input[type="checkbox"].requested-checkbox { accent-color: #eab308; }
+    .added-by-copy { position: relative; display: inline-flex; align-items: center; gap: 5px; }
+    .added-by-copy::after { content: '✏️'; font-size: 10px; opacity: 0; transition: opacity .15s; pointer-events: none; }
+    .added-by-copy:hover::after { opacity: 0.6; }
+    .added-by-hint { font-size: 11px; color: var(--muted); display: none; }
+    @media (hover: none) { .added-by-copy::after { content: ''; } .added-by-hint { display: inline !important; } }
     .no-copy, .num, .album-name, .spotify-mark, .spotify-mark img { -webkit-user-select: none; user-select: none; -webkit-user-drag: none; }
     .num, .album-name { pointer-events: none; }
     .site-footer { text-align: center; color: var(--muted); font-size: 13px; padding: 0 18px 36px; }
@@ -1051,7 +1056,8 @@ async function exportToHTML() {
         const input = document.createElement('input');
         input.className = 'language-edit';
         input.type = 'text';
-        input.value = current;
+        input.placeholder = 'Who added this?';
+        input.value = current === '—' ? '' : current;
         button.replaceWith(input);
         input.focus();
         input.select();
@@ -1084,14 +1090,25 @@ async function exportToHTML() {
       button.addEventListener('dblclick', triggerEdit);
 
       let lastTap = 0;
+      let tapTimer = null;
       button.addEventListener('touchend', event => {
-        const currentTime = new Date().getTime();
+        const currentTime = Date.now();
         const tapLength = currentTime - lastTap;
-        if (tapLength < 500 && tapLength > 0) {
+        if (tapLength < 400 && tapLength > 0) {
+          // Double tap — edit
+          clearTimeout(tapTimer);
           event.preventDefault();
           triggerEdit();
+          lastTap = 0;
+        } else {
+          // First tap — wait to see if second tap arrives
+          lastTap = currentTime;
+          clearTimeout(tapTimer);
+          tapTimer = setTimeout(() => {
+            // Single tap — copy
+            copySingleText(button.dataset.copy || '', button);
+          }, 420);
         }
-        lastTap = currentTime;
       });
     });
 
