@@ -155,8 +155,29 @@ function getToken() {
   return (token && Date.now() < expiry) ? token : null;
 }
 
+// Fetches the current user profile ID and caches it.
+async function getCurrentUserId(token) {
+  let userId = localStorage.getItem('sp_user_id');
+  if (userId) return userId;
+
+  try {
+    const resp = await fetch('https://api.spotify.com/v1/me', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (resp.ok) {
+      const meData = await resp.json();
+      localStorage.setItem('sp_user_id', meData.id);
+      localStorage.setItem('sp_user_name', meData.display_name || meData.id);
+      return meData.id;
+    }
+  } catch (err) {
+    console.warn('[Auth] Failed to fetch current user ID:', err);
+  }
+  return null;
+}
+
 function disconnectSpotify() {
-  ['sp_token','sp_expiry','sp_refresh','sp_client_id'].forEach(k => localStorage.removeItem(k));
+  ['sp_token','sp_expiry','sp_refresh','sp_client_id','sp_user_id','sp_user_name'].forEach(k => localStorage.removeItem(k));
   updateAuthUI();
 }
 
@@ -230,13 +251,43 @@ function showError(msg, boxId = 'errorBox') {
   box.style.display = 'flex';
 }
 
-function showSpotifyApiError(err, rawUrl) {
+function showSpotifyApiError(err, rawUrl, playlistOwnerId = null, currentUserId = null) {
   const details = formatSpotifyErrorDetails(err);
+  
+  let customExplanation = '';
+  if (err?.status === 403 || isSpotifyForbiddenError(err)) {
+    if (playlistOwnerId && currentUserId && playlistOwnerId !== currentUserId) {
+      customExplanation = `
+        <div style="margin-top:8px; line-height:1.4; color:#fca5a5;">
+          <strong>Ownership Restriction:</strong> This playlist is owned by another user (ID: <code>${escHtml(playlistOwnerId)}</code>), but you are logged in as <code>${escHtml(currentUserId)}</code>.<br>
+          Since Spotify's API changes in March 2026, Development Mode apps can only access tracks of playlists that you own or collaborate on.<br>
+          <strong style="display:block; margin-top:6px;">Workarounds:</strong>
+          <ul style="margin: 4px 0 0; padding-left: 20px;">
+            <li>Switch to <strong>Web Fetch Mode</strong> (no login required).</li>
+            <li>Or copy/add all songs of this playlist to a new playlist in Spotify (which you own), and fetch that new playlist URL instead!</li>
+          </ul>
+        </div>`;
+    } else {
+      customExplanation = `
+        <div style="margin-top:8px; line-height:1.4; color:#fca5a5;">
+          <strong>Why is this forbidden?</strong> Since March 2026, Spotify's API restricts Development Mode apps from fetching tracks of playlists unless you are the owner or a collaborator.<br>
+          <strong style="display:block; margin-top:6px;">Workarounds:</strong>
+          <ul style="margin: 4px 0 0; padding-left: 20px;">
+            <li>Switch to <strong>Web Fetch Mode</strong>.</li>
+            <li>Or copy all songs to a new playlist you own, then fetch the new playlist here.</li>
+          </ul>
+        </div>`;
+    }
+  }
+
   showError(`
-    <div>
+    <div style="width:100%">
       <div><strong>Spotify API error:</strong> ${escHtml(err.message || 'Unknown error')}</div>
+      ${customExplanation}
       ${details ? `<pre style="margin:10px 0 0;white-space:pre-wrap;font:12px/1.45 Consolas,monospace;color:#fecaca;">${escHtml(details)}</pre>` : ''}
-      <a href="${RENDER_ORIGIN}/" style="display:inline-flex;margin-top:10px;color:#fca5a5;font-weight:700;">Open with Render Web Fetch</a>
+      <div style="margin-top:12px;">
+        <a href="${RENDER_ORIGIN}/" style="display:inline-flex;color:#fca5a5;font-weight:700;text-decoration:underline;">Switch to Web Fetch (No Login Required)</a>
+      </div>
     </div>
   `, 'errorBox2');
 }
@@ -416,6 +467,13 @@ async function fetchPlaylist() {
       return;
     }
 
+    let currentUserId = null;
+    try {
+      currentUserId = await getCurrentUserId(token);
+    } catch (e) {
+      console.warn('[Spotify] Could not fetch current user ID:', e);
+    }
+
     setLoading(true, 'Fetching playlist info…');
     try {
       playlistData = await fetchPlaylistMeta(token, playlistId);
@@ -444,7 +502,7 @@ async function fetchPlaylist() {
     } catch (err) {
       setLoading(false);
       if (isSpotifyForbiddenError(err)) {
-        showSpotifyApiError(err, rawUrl);
+        showSpotifyApiError(err, rawUrl, playlistData?.owner?.id, currentUserId);
         return;
       }
       showError(err.message || 'Something went wrong.', 'errorBox2');
