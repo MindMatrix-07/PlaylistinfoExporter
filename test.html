@@ -155,19 +155,6 @@
         <p>Paste any public Spotify playlist URL or URI below.</p>
       </div>
 
-      <!-- Spotify API Policy Disclaimer for logged-in premium users -->
-      <div id="premiumPlaylistDisclaimer" class="help-box" style="background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.25); align-items: flex-start; margin-bottom: 24px; display: none;">
-        <svg viewBox="0 0 24 24" fill="none" style="color: #f59e0b; flex-shrink: 0; margin-top: 2px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="currentColor"/></svg>
-        <div style="font-size: 0.85rem; color: #fca5a5; line-height: 1.5; text-align: left; width: 100%;">
-          <strong>⚠️ Spotify API Restriction (Since March 2026):</strong> Development Mode apps cannot access tracks of playlists owned by other accounts.
-          <div style="margin-top: 6px; font-weight: bold; color: #ffffff;">How to solve this:</div>
-          <ul style="margin: 4px 0 0 0; padding-left: 20px;">
-            <li><strong>Option A (Web Fetch):</strong> Switch to <strong>Spotify Web Fetch</strong> mode at the top of the screen (no login or setup needed).</li>
-            <li><strong>Option B (Clone Playlist):</strong> Open the playlist in your Spotify app, right-click &rarr; <strong>Add to other playlist</strong> &rarr; <strong>New playlist</strong>. Paste your newly cloned playlist link here to fetch it instantly!</li>
-          </ul>
-        </div>
-      </div>
-
       <div class="input-group full-width" style="margin-bottom:24px;">
         <label for="playlistUrl">Playlist URL or URI</label>
         <div class="input-wrapper">
@@ -196,6 +183,19 @@
         <p class="ai-disclaimer" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px; margin-left: 52px; display: flex; align-items: center; gap: 6px; line-height: 1.4;">
           <span>⚠️ Note: AI language detection is search-based and may occasionally make mistakes.</span>
         </p>
+      </div>
+
+      <!-- Spotify API Policy Disclaimer for logged-in premium users -->
+      <div id="premiumPlaylistDisclaimer" class="help-box" style="background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.25); align-items: flex-start; margin-bottom: 24px; display: none;">
+        <svg viewBox="0 0 24 24" fill="none" style="color: #f59e0b; flex-shrink: 0; margin-top: 2px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="currentColor"/></svg>
+        <div style="font-size: 0.85rem; color: #fca5a5; line-height: 1.5; text-align: left; width: 100%;">
+          <strong>⚠️ Spotify API Restriction (Since March 2026):</strong> Development Mode apps cannot access tracks of playlists owned by other accounts.
+          <div style="margin-top: 6px; font-weight: bold; color: #ffffff;">How to solve this:</div>
+          <ul style="margin: 4px 0 0 0; padding-left: 20px;">
+            <li><strong>Option A (Web Fetch):</strong> Switch to <strong>Spotify Web Fetch</strong> mode at the top of the screen (no login or setup needed).</li>
+            <li><strong>Option B (Clone Playlist):</strong> Open the playlist in your Spotify app, right-click &rarr; <strong>Add to other playlist</strong> &rarr; <strong>New playlist</strong>. Paste your newly cloned playlist link here to fetch it instantly!</li>
+          </ul>
+        </div>
       </div>
 
       <button class="btn-fetch" id="fetchBtn" onclick="fetchPlaylist()">
