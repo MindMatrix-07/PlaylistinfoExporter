@@ -245,9 +245,10 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
   // ── Step 1: Odesli → Deezer (primary — no rate limits, 5s/3s timeout) ────
   const deezerResult = await fetchOdesliDeezerISRC(trackUrl);
   if (deezerResult?.isrc) {
+    const albumArt = deezerResult.albumArt || await fetchSoundplateArt(trackUrl) || playlistImage;
     return {
       isrc: deezerResult.isrc,
-      albumArt: deezerResult.albumArt || playlistImage,
+      albumArt,
       albumName: deezerResult.albumName || 'Unknown Album',
       trackUrl,
       lookupStatus: 'deezer_ok'
@@ -280,9 +281,10 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
   console.log(`[Fallback] Trying langlaisben for ${trackId || trackUrl}`);
   const wixResult = await fetchLanglaisbenISRC(trackUrl);
   if (wixResult?.isrc) {
+    const albumArt = wixResult.albumArt || await fetchSoundplateArt(trackUrl) || playlistImage;
     return {
       isrc: wixResult.isrc,
-      albumArt: wixResult.albumArt || playlistImage,
+      albumArt,
       albumName: wixResult.albumName || 'Unknown Album',
       trackUrl,
       lookupStatus: 'wix_ok'
@@ -295,6 +297,21 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     trackUrl,
     lookupStatus: 'no_isrc'
   };
+}
+
+// Quick Soundplate call just to get album art (used when primary source has ISRC but no art)
+async function fetchSoundplateArt(trackUrl) {
+  try {
+    const resp = await fetchWithTimeout(
+      `${SOUNDPLATE_API}?q=${encodeURIComponent(trackUrl)}`,
+      { headers: SOUNDPLATE_HEADERS },
+      3000
+    );
+    const data = await resp.json().catch(() => ({}));
+    return data.artwork_url || null;
+  } catch {
+    return null;
+  }
 }
 
 // langlaisben.com Wix serverless function — uses their Spotify API integration.
