@@ -333,56 +333,102 @@ function scrapeSpotifyPlaylistDOM(totalTracks) {
   }
 
   function getAddedByFromRow(row) {
-    // Strategy 1: profile avatar img with aria-label
+    // ── Strategy 1 (most reliable): user profile link text ──────────────────
+    // Spotify renders the contributor name as visible text inside an <a> tag
+    // that points to their profile page.
+    const userLinks = row.querySelectorAll('a[href*="/user/"]');
+    for (const link of userLinks) {
+      const text = (link.textContent || '').trim();
+      if (text && text.length > 0 && text.length < 120) return text;
+    }
+
+    // ── Strategy 2: small avatar img with aria-label ─────────────────────────
+    // Profile avatars are small (≤48px) and carry the display name as aria-label.
+    // Album art images are large and typically lack aria-label.
     const imgs = row.querySelectorAll('img');
     for (const img of imgs) {
-      const label = img.getAttribute('aria-label') || '';
-      if (label) {
-        const w = img.naturalWidth || img.width || img.offsetWidth;
-        // Avatar images are small; album art typically doesn't have aria-label
-        if (w <= 64 || label.length < 80) return label.trim();
-      }
+      const label = (img.getAttribute('aria-label') || '').trim();
+      if (!label) continue;
+      const w = img.naturalWidth || img.width || img.offsetWidth || 0;
+      // Skip large images (album art is typically 40–56px but has no aria-label normally)
+      if (w > 48 && w !== 0) continue;
+      if (label.length < 120) return label;
     }
-    // Strategy 2: figure/div with aria-label (Spotify uses role=img wrappers)
+
+    // ── Strategy 3: role="img" wrapper aria-label ────────────────────────────
     const imgRoles = row.querySelectorAll('[role="img"]');
     for (const el of imgRoles) {
-      const label = el.getAttribute('aria-label') || '';
-      if (label && !label.toLowerCase().includes('cover') && !label.toLowerCase().includes('album')) {
-        return label.trim();
+      const label = (el.getAttribute('aria-label') || '').trim();
+      if (label && !/(cover|album|playlist)/i.test(label) && label.length < 120) {
+        return label;
       }
     }
-    // Strategy 3: look for a span/div with title in the added-by column area
-    // Spotify's grid typically has added-by in the 2nd-to-last column
+
+    // ── Strategy 4: scan every [aria-colindex] cell for a non-empty text node
+    // The "Added by" column is typically colindex 4 or 5 (not 1=num, 2=title, 3=album)
     const cells = row.querySelectorAll('[aria-colindex]');
-    const addedByCell = cells[cells.length - 2] || null;
-    if (addedByCell) {
-      const titled = addedByCell.querySelector('[title]');
-      if (titled?.title) return titled.title.trim();
-      const labeled = addedByCell.querySelector('[aria-label]');
-      if (labeled?.getAttribute('aria-label')) return labeled.getAttribute('aria-label').trim();
+    const colIndexes = Array.from(cells).map(c => parseInt(c.getAttribute('aria-colindex') || '0', 10));
+    const maxCol = Math.max(...colIndexes, 0);
+    for (const cell of cells) {
+      const col = parseInt(cell.getAttribute('aria-colindex') || '0', 10);
+      // Skip the track number, title, album columns; also skip the last (duration)
+      if (col <= 3 || col === maxCol) continue;
+      // Try title/aria-label attributes
+      const el = cell.querySelector('[title], [aria-label]');
+      const attr = el?.getAttribute('title') || el?.getAttribute('aria-label') || '';
+      if (attr && attr.trim().length < 120) return attr.trim();
+      // Try the cell's visible text (strip whitespace)
+      const text = cell.textContent.replace(/\s+/g, ' ').trim();
+      if (text && text.length > 0 && text.length < 80) return text;
     }
+
     return '';
   }
 
-  function getRowIndex(row) {
-    // aria-rowindex is 1-based
-    const rowIndex = parseInt(row.getAttribute('aria-rowindex') || '0', 10);
-    if (rowIndex > 0) return rowIndex - 1;
-    // Try the # cell (first column)
+  function getRowIndex(row, fallbackIndex) {
+    // aria-rowindex is 1-based on the row element itself
+    const self = parseInt(row.getAttribute('aria-rowindex') || '0', 10);
+    if (self > 0) return self - 1;
+
+    // Some Spotify versions put aria-rowindex on a parent grid container
+    const ancestor = row.closest('[aria-rowindex]');
+    if (ancestor && ancestor !== row) {
+      const idx = parseInt(ancestor.getAttribute('aria-rowindex') || '0', 10);
+      if (idx > 0) return idx - 1;
+    }
+
+    // Try the # column (first cell) — only valid if it shows a plain number
     const numCell = row.querySelector('[aria-colindex="1"]');
-    const num = parseInt(numCell?.textContent?.trim() || '0', 10);
-    if (num > 0) return num - 1;
-    return -1;
+    if (numCell) {
+      // Spotify shows play/pause icon on hover; use innerText which may be just digits
+      const text = (numCell.innerText || numCell.textContent || '').replace(/[^\d]/g, '').trim();
+      const num = parseInt(text, 10);
+      if (num > 0) return num - 1;
+    }
+
+    // Last resort: use the row's DOM order among its siblings
+    return fallbackIndex;
   }
 
-  function collectVisibleRows(trackMap) {
-    const rows = document.querySelectorAll('[data-testid="tracklist-row"], [role="row"][aria-rowindex]');
+  function collectVisibleRows(trackMap, allKnownRows) {
+    const rows = Array.from(
+      document.querySelectorAll('[data-testid="tracklist-row"], [role="row"]')
+    ).filter(r =>
+      // Keep only actual track rows that have column cells
+      r.querySelector('[aria-colindex]') !== null
+    );
+
     let newCount = 0;
-    rows.forEach(row => {
-      const idx = getRowIndex(row);
-      if (idx < 0 || trackMap.has(idx)) return;
+    rows.forEach((row, domIndex) => {
+      // Use DOM order within currently visible rows as a stable fallback index
+      const globalIndex = allKnownRows
+        ? allKnownRows.indexOf(row)
+        : domIndex;
+      const idx = getRowIndex(row, globalIndex >= 0 ? globalIndex : domIndex);
+
+      if (trackMap.has(idx)) return; // already captured
+
       const addedByName = getAddedByFromRow(row);
-      // Even if name is empty, record the slot so we know the row was seen
       trackMap.set(idx, { index: idx, addedByName });
       if (addedByName) newCount++;
     });
@@ -394,40 +440,55 @@ function scrapeSpotifyPlaylistDOM(totalTracks) {
 
     // Find the scrollable viewport (Spotify uses OverlayScrollbars or similar)
     const scrollEl = document.querySelector(
-      '[data-overlayscrollbars-viewport], .os-viewport, .main-view-container__scroll-node, '
-      + '[data-testid="main-view"] > div, [class*="contentSpacing"]'
+      '[data-overlayscrollbars-viewport], .os-viewport, '
+      + '.main-view-container__scroll-node, [data-testid="main-view"] > div, '
+      + '[class*="contentSpacing"], main'
     );
 
-    // First pass — collect what's already visible
-    collectVisibleRows(trackMap);
+    // Collect an initial ordered list of all rows for stable index mapping
+    let allKnownRows = [];
 
-    if (scrollEl && totalTracks > 0) {
-      const SCROLL_STEP = 800;
-      const SCROLL_DELAY = 350;
-      const MAX_SCROLLS = Math.ceil((totalTracks * 60) / SCROLL_STEP) + 10;
+    // First pass — collect what's already visible
+    collectVisibleRows(trackMap, allKnownRows);
+
+    if (totalTracks > 0) {
+      const SCROLL_STEP = 700;
+      const SCROLL_DELAY = 400;
+      const MAX_SCROLLS = Math.ceil((totalTracks * 70) / SCROLL_STEP) + 15;
 
       let lastTop = -1;
       let sameCount = 0;
+      const target = scrollEl || document.documentElement;
 
       for (let i = 0; i < MAX_SCROLLS; i++) {
-        scrollEl.scrollTop += SCROLL_STEP;
+        target.scrollTop += SCROLL_STEP;
+        if (!scrollEl) window.scrollBy(0, SCROLL_STEP);
         await sleep(SCROLL_DELAY);
-        collectVisibleRows(trackMap);
+
+        // Refresh known rows list after each scroll
+        allKnownRows = Array.from(
+          document.querySelectorAll('[data-testid="tracklist-row"], [role="row"]')
+        ).filter(r => r.querySelector('[aria-colindex]') !== null);
+
+        collectVisibleRows(trackMap, allKnownRows);
 
         // Stop when all tracks found
         if (trackMap.size >= totalTracks) break;
-        // Stop when scroll position didn't change (reached end)
-        if (scrollEl.scrollTop === lastTop) {
+
+        // Stop when scroll position didn't change (reached end of list)
+        const curTop = target.scrollTop;
+        if (curTop === lastTop) {
           sameCount++;
           if (sameCount >= 3) break;
         } else {
           sameCount = 0;
-          lastTop = scrollEl.scrollTop;
+          lastTop = curTop;
         }
       }
 
       // Scroll back to top
-      scrollEl.scrollTop = 0;
+      target.scrollTop = 0;
+      if (!scrollEl) window.scrollTo(0, 0);
     }
 
     const tracks = Array.from(trackMap.values())
