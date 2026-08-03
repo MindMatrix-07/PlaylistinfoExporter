@@ -67,6 +67,35 @@ window.addEventListener("message", (event) => {
     );
   }
 
+  if (event.data?.type === "FROM_PAGE_SCRAPE_PLAYLIST_ADDED_BY") {
+    const { playlistUrl, totalTracks, requestId } = event.data;
+
+    chrome.runtime.sendMessage(
+      { type: "SCRAPE_PLAYLIST_ADDED_BY", playlistUrl, totalTracks, requestId },
+      (res) => {
+        if (chrome.runtime.lastError) {
+          window.postMessage({
+            type: "FROM_EXT_SCRAPE_ADDED_BY_RESPONSE",
+            ok: false,
+            error: chrome.runtime.lastError.message,
+            tracks: [],
+            requestId
+          }, "*");
+        } else {
+          window.postMessage({
+            type: "FROM_EXT_SCRAPE_ADDED_BY_RESPONSE",
+            ok: res?.ok ?? false,
+            tracks: res?.tracks || [],
+            count: res?.count || 0,
+            withNames: res?.withNames || 0,
+            error: res?.error,
+            requestId
+          }, "*");
+        }
+      }
+    );
+  }
+
   if (event.data?.type === "FROM_PAGE_GET_AI_DEBUG_LOG") {
     chrome.runtime.sendMessage({ type: "GET_AI_DEBUG_LOG" }, (res) => {
       window.postMessage({

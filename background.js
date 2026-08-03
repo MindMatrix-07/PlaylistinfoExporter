@@ -246,6 +246,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === 'SCRAPE_PLAYLIST_ADDED_BY') {
+    scrapePlaylistAddedBy(message.playlistUrl, message.totalTracks || 0)
+      .then(result => sendResponse({ ok: true, ...result }))
+      .catch(err => {
+        addAiDebug('bg', 'SCRAPE_PLAYLIST_ADDED_BY failed', { error: err.message });
+        sendResponse({ ok: false, error: err.message, tracks: [] });
+      });
+    return true;
+  }
+
   if (message?.type === 'GET_AI_DEBUG_LOG') {
     sendResponse({ ok: true, entries: getAiDebugTail(160) });
     return true;
@@ -258,6 +268,178 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
+
+// ─── Scrape "Added by" from live Spotify tab ─────────────────────────────────
+
+async function scrapePlaylistAddedBy(playlistUrl, totalTracks) {
+  if (!playlistUrl) throw new Error('No playlist URL provided');
+
+  // Extract playlist ID from URL
+  const playlistId = playlistUrl.match(/playlist\/([A-Za-z0-9]+)/)?.[1] || '';
+  if (!playlistId) throw new Error('Could not extract playlist ID');
+
+  // Find an existing Spotify tab with this playlist
+  const allTabs = await chrome.tabs.query({ url: 'https://open.spotify.com/*' });
+  let spotifyTab = allTabs.find(t =>
+    t.url && t.url.includes(playlistId)
+  ) || allTabs[0] || null;
+
+  let openedTab = false;
+  if (!spotifyTab) {
+    addAiDebug('bg', 'No Spotify tab found — opening one', { playlistUrl });
+    spotifyTab = await chrome.tabs.create({ url: playlistUrl, active: false });
+    openedTab = true;
+    await waitForTabComplete(spotifyTab.id);
+    // Extra wait for Spotify SPA to render the tracklist
+    await new Promise(r => setTimeout(r, 4000));
+  } else {
+    // Navigate to the correct playlist URL if needed
+    if (spotifyTab.url && !spotifyTab.url.includes(playlistId)) {
+      await chrome.tabs.update(spotifyTab.id, { url: playlistUrl });
+      await waitForTabComplete(spotifyTab.id);
+      await new Promise(r => setTimeout(r, 4000));
+    } else {
+      // Already on the right page — give it a moment to be ready
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: spotifyTab.id },
+      func: scrapeSpotifyPlaylistDOM,
+      args: [totalTracks]
+    });
+    const data = result?.result || { tracks: [], count: 0 };
+    addAiDebug('bg', 'Spotify DOM scrape complete', {
+      found: data.tracks?.length,
+      totalExpected: totalTracks
+    });
+    return data;
+  } finally {
+    if (openedTab && spotifyTab?.id) {
+      await chrome.tabs.remove(spotifyTab.id).catch(() => {});
+    }
+  }
+}
+
+/**
+ * Injected into the Spotify tab — reads the rendered tracklist DOM.
+ * Scrolls through virtual-scroll list to capture all rows.
+ */
+function scrapeSpotifyPlaylistDOM(totalTracks) {
+  function sleep(ms) {
+    return new Promise(r => setTimeout(r, ms));
+  }
+
+  function getAddedByFromRow(row) {
+    // Strategy 1: profile avatar img with aria-label
+    const imgs = row.querySelectorAll('img');
+    for (const img of imgs) {
+      const label = img.getAttribute('aria-label') || '';
+      if (label) {
+        const w = img.naturalWidth || img.width || img.offsetWidth;
+        // Avatar images are small; album art typically doesn't have aria-label
+        if (w <= 64 || label.length < 80) return label.trim();
+      }
+    }
+    // Strategy 2: figure/div with aria-label (Spotify uses role=img wrappers)
+    const imgRoles = row.querySelectorAll('[role="img"]');
+    for (const el of imgRoles) {
+      const label = el.getAttribute('aria-label') || '';
+      if (label && !label.toLowerCase().includes('cover') && !label.toLowerCase().includes('album')) {
+        return label.trim();
+      }
+    }
+    // Strategy 3: look for a span/div with title in the added-by column area
+    // Spotify's grid typically has added-by in the 2nd-to-last column
+    const cells = row.querySelectorAll('[aria-colindex]');
+    const addedByCell = cells[cells.length - 2] || null;
+    if (addedByCell) {
+      const titled = addedByCell.querySelector('[title]');
+      if (titled?.title) return titled.title.trim();
+      const labeled = addedByCell.querySelector('[aria-label]');
+      if (labeled?.getAttribute('aria-label')) return labeled.getAttribute('aria-label').trim();
+    }
+    return '';
+  }
+
+  function getRowIndex(row) {
+    // aria-rowindex is 1-based
+    const rowIndex = parseInt(row.getAttribute('aria-rowindex') || '0', 10);
+    if (rowIndex > 0) return rowIndex - 1;
+    // Try the # cell (first column)
+    const numCell = row.querySelector('[aria-colindex="1"]');
+    const num = parseInt(numCell?.textContent?.trim() || '0', 10);
+    if (num > 0) return num - 1;
+    return -1;
+  }
+
+  function collectVisibleRows(trackMap) {
+    const rows = document.querySelectorAll('[data-testid="tracklist-row"], [role="row"][aria-rowindex]');
+    let newCount = 0;
+    rows.forEach(row => {
+      const idx = getRowIndex(row);
+      if (idx < 0 || trackMap.has(idx)) return;
+      const addedByName = getAddedByFromRow(row);
+      // Even if name is empty, record the slot so we know the row was seen
+      trackMap.set(idx, { index: idx, addedByName });
+      if (addedByName) newCount++;
+    });
+    return newCount;
+  }
+
+  return new Promise(async (resolve) => {
+    const trackMap = new Map();
+
+    // Find the scrollable viewport (Spotify uses OverlayScrollbars or similar)
+    const scrollEl = document.querySelector(
+      '[data-overlayscrollbars-viewport], .os-viewport, .main-view-container__scroll-node, '
+      + '[data-testid="main-view"] > div, [class*="contentSpacing"]'
+    );
+
+    // First pass — collect what's already visible
+    collectVisibleRows(trackMap);
+
+    if (scrollEl && totalTracks > 0) {
+      const SCROLL_STEP = 800;
+      const SCROLL_DELAY = 350;
+      const MAX_SCROLLS = Math.ceil((totalTracks * 60) / SCROLL_STEP) + 10;
+
+      let lastTop = -1;
+      let sameCount = 0;
+
+      for (let i = 0; i < MAX_SCROLLS; i++) {
+        scrollEl.scrollTop += SCROLL_STEP;
+        await sleep(SCROLL_DELAY);
+        collectVisibleRows(trackMap);
+
+        // Stop when all tracks found
+        if (trackMap.size >= totalTracks) break;
+        // Stop when scroll position didn't change (reached end)
+        if (scrollEl.scrollTop === lastTop) {
+          sameCount++;
+          if (sameCount >= 3) break;
+        } else {
+          sameCount = 0;
+          lastTop = scrollEl.scrollTop;
+        }
+      }
+
+      // Scroll back to top
+      scrollEl.scrollTop = 0;
+    }
+
+    const tracks = Array.from(trackMap.values())
+      .sort((a, b) => a.index - b.index);
+
+    resolve({
+      tracks,
+      count: tracks.length,
+      withNames: tracks.filter(t => t.addedByName).length
+    });
+  });
+}
 
 async function submitGoogleFollowUp(tabId, query, requestId) {
   addAiDebug('bg', 'Submitting Google follow-up', { requestId, tabId });

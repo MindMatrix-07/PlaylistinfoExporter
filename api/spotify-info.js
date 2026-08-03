@@ -111,8 +111,10 @@ async function spotifyInfoHandler(req, res) {
         lookupStatus: 'pending'
       };
       const artistNames = normalizeArtists(t);
+      const addedBy = normalizeAddedByObj(t.addedBy || t.added_by || t.added_at_user || (t.addedByUserId ? { id: t.addedByUserId, display_name: t.addedByName } : null));
 
       return {
+        added_by: addedBy,
         track: {
           name: t.name || 'Unknown',
           artists: artistNames.map(name => ({ name })),
@@ -120,6 +122,7 @@ async function spotifyInfoHandler(req, res) {
           external_urls: { spotify: trackUrl },
           external_ids: { isrc },
           preview_url: t.preview_url || t.previewUrl || '',
+          addedBy,
           albumArt,
           lookupStatus
         }
@@ -470,6 +473,21 @@ function getSpotifyTrackUrl(track, trackId) {
   }
 
   return trackId ? `https://open.spotify.com/track/${trackId}` : '';
+}
+
+function normalizeAddedByObj(addedBy) {
+  if (!addedBy) return null;
+  if (typeof addedBy === 'string') {
+    return { id: addedBy, display_name: addedBy, name: addedBy };
+  }
+  const id = addedBy.id || addedBy.name || '';
+  if (!id && !addedBy.display_name && !addedBy.name) return null;
+  return {
+    id: id,
+    display_name: addedBy.display_name || addedBy.name || id,
+    name: addedBy.name || addedBy.display_name || id,
+    external_urls: addedBy.external_urls || { spotify: addedBy.url || (id ? `https://open.spotify.com/user/${id}` : '') }
+  };
 }
 
 module.exports.helpers = {

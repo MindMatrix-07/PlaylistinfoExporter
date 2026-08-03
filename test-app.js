@@ -381,6 +381,7 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
         url:     t.external_urls?.spotify || `https://open.spotify.com/track/${t.id}`,
         isrc:    isrc,
         previewUrl: t.preview_url || '',
+        addedBy: normalizeAddedBy(i.added_by),
         language: ''
       };
     }));
@@ -391,6 +392,133 @@ async function fetchAllTracks(token, playlistId, totalExpected, onProgress) {
   }
 
   return tracks;
+}
+
+function normalizeAddedBy(addedBy) {
+  if (!addedBy) return null;
+  if (typeof addedBy === 'string') {
+    return { id: addedBy, name: addedBy, url: `https://open.spotify.com/user/${addedBy}`, image: '' };
+  }
+  const id = addedBy.id || addedBy.name || '';
+  if (!id && !addedBy.name && !addedBy.display_name) return null;
+  return {
+    id: id,
+    name: addedBy.display_name || addedBy.name || id,
+    url: addedBy.external_urls?.spotify || addedBy.url || (id ? `https://open.spotify.com/user/${id}` : ''),
+    image: addedBy.image || ''
+  };
+}
+
+function normalizeOwnerProfile(owner) {
+  if (!owner?.id) return null;
+  return {
+    id: owner.id,
+    name: owner.display_name || '',
+    url: owner.external_urls?.spotify || `https://open.spotify.com/user/${owner.id}`,
+    image: owner.images?.[0]?.url || ''
+  };
+}
+
+async function enrichAddedByProfiles(token, tracks, onProgress, fallbackProfiles = []) {
+  const uniqueIds = Array.from(new Set(
+    tracks.map(track => track.addedBy?.id).filter(Boolean)
+  ));
+  if (!uniqueIds.length) return;
+
+  const profiles = new Map();
+  let cursor = 0;
+  let done = 0;
+  const concurrency = 4;
+
+  async function worker() {
+    while (cursor < uniqueIds.length) {
+      const id = uniqueIds[cursor++];
+      if (token) {
+        const profile = await fetchSpotifyUserProfile(token, id);
+        if (profile) profiles.set(id, profile);
+      }
+      done++;
+      if (onProgress) onProgress(done, uniqueIds.length);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, uniqueIds.length) }, worker));
+
+  let scrapedProfiles = new Map();
+  try {
+    const scraped = await requestSpotifyProfilesFromExtension(uniqueIds);
+    scrapedProfiles = new Map(Object.values(scraped || {}).filter(Boolean).map(profile => [profile.id, profile]));
+  } catch (err) {
+    console.warn('[Spotify] Profile page scrape skipped:', err.message);
+  }
+
+  const fallbacks = new Map(
+    fallbackProfiles.filter(Boolean).map(profile => [profile.id, profile])
+  );
+
+  tracks.forEach(track => {
+    const id = track.addedBy?.id;
+    const fallback = fallbacks.get(id);
+    const profile = profiles.get(id);
+    const scraped = scrapedProfiles.get(id);
+    const next = { ...track.addedBy };
+
+    [fallback, profile, scraped].forEach(source => {
+      if (!source) return;
+      next.id = source.id || next.id;
+      next.url = source.url || next.url;
+      if (source.image) next.image = source.image;
+      if (source.name && source.name !== source.id) next.name = source.name;
+    });
+
+    if (!next.name) next.name = next.id || 'Spotify profile';
+    track.addedBy = next;
+  });
+}
+
+function requestSpotifyProfilesFromExtension(userIds) {
+  const uniqueIds = Array.from(new Set((userIds || []).filter(Boolean)));
+  if (!uniqueIds.length) return Promise.resolve({});
+
+  const requestId = `spotify-profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'FETCH_SPOTIFY_PROFILES', userIds: uniqueIds, requestId },
+        (res) => {
+          if (chrome.runtime.lastError || !res?.ok) {
+            console.warn('[Spotify] Profile scrape extension request failed:', chrome.runtime.lastError?.message || res?.error);
+            resolve({});
+          } else {
+            resolve(res.profiles || {});
+          }
+        }
+      );
+    });
+  }
+
+  return Promise.resolve({});
+}
+
+async function fetchSpotifyUserProfile(token, userId) {
+  try {
+    const resp = await fetch(
+      `https://api.spotify.com/v1/users/${encodeURIComponent(userId)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return {
+      id: data.id || userId,
+      name: data.display_name || '',
+      url: data.external_urls?.spotify || `https://open.spotify.com/user/${userId}`,
+      image: data.images?.[0]?.url || ''
+    };
+  } catch (err) {
+    console.warn('[Spotify] Failed to fetch added-by profile:', userId, err.message);
+    return null;
+  }
 }
 
 // ─── Main Fetch Handler ───────────────────────
@@ -430,21 +558,32 @@ async function fetchPlaylist() {
 
       allTracks = resData.tracks.items.map(item => {
         const t = item.track;
+        const rawAddedBy = item.added_by || item.addedBy || t?.addedBy || t?.added_by;
         return {
           name: t.name,
-          artists: t.artists.map(a => a.name).join(', '),
+          artists: Array.isArray(t.artists) ? t.artists.map(a => a.name || a).join(', ') : (t.artists || ''),
           album: t.album?.name || '',
           albumArt: t.albumArt,
           url: t.external_urls?.spotify,
           isrc: t.external_ids?.isrc || '—',
           previewUrl: t.preview_url || '',
+          addedBy: normalizeAddedBy(rawAddedBy),
           language: ''
         };
       });
 
       await enrichMissingPreviewUrls();
+      await enrichAddedByProfiles(null, allTracks);
       setLoading(false);
       renderResults();
+
+      // Kick off "Added by" scrape from Spotify tab (runs in background)
+      if (hasExtension || (typeof chrome !== 'undefined' && chrome.runtime)) {
+        applyScrapedAddedBy(rawUrl, (status) => {
+          const el = document.getElementById('addedByScrapeStatus');
+          if (el) el.textContent = status;
+        });
+      }
 
       // Trigger Google AI language detection if selected
       const aiModeCheckbox = document.getElementById('aiModeCheckbox');
@@ -491,6 +630,11 @@ async function fetchPlaylist() {
         setLoading(true, `Fetching tracks (${done}${all ? ' / ' + all : ''})…`);
       });
 
+      setLoading(true, 'Fetching added-by profiles…');
+      await enrichAddedByProfiles(token, allTracks, (done, all) => {
+        setLoading(true, `Fetching added-by profiles (${done} / ${all})…`);
+      }, [normalizeOwnerProfile(playlistData.owner)]);
+
       setLoading(false);
       renderResults();
 
@@ -520,7 +664,7 @@ async function fetchPlaylist() {
 function getAddedByDisplayName(track) {
   if (!track) return '';
   if (typeof track.addedBy === 'string') return track.addedBy;
-  return track.addedBy?.name || track.addedBy?.id || '';
+  return track.addedBy?.name || track.addedBy?.display_name || track.addedBy?.id || '';
 }
 
 function renderResults() {
@@ -913,6 +1057,7 @@ async function exportToHTML() {
         justify-self: end;
         display: flex;
         align-items: center;
+        width: auto !important;
       }
       .done-cell {
         grid-column: 5;
@@ -920,6 +1065,7 @@ async function exportToHTML() {
         justify-self: end;
         display: flex;
         align-items: center;
+        width: auto !important;
       }
     }
   </style>
@@ -1702,10 +1848,82 @@ async function exportToPDF() {
   }
 }
 
+// ─── Scrape "Added by" from live Spotify tab (Web Fetch Mode) ───────────────
+
+function requestPlaylistAddedByScrape(playlistUrl, totalTracks) {
+  const requestId = `scrape-added-by-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        { type: 'SCRAPE_PLAYLIST_ADDED_BY', playlistUrl, totalTracks, requestId },
+        (res) => {
+          if (chrome.runtime.lastError || !res?.ok) {
+            console.warn('[AddedBy] Scrape request failed:', chrome.runtime.lastError?.message || res?.error);
+            resolve([]);
+          } else {
+            resolve(res.tracks || []);
+          }
+        }
+      );
+    });
+  }
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      addedByScrapeRequests.delete(requestId);
+      console.warn('[AddedBy] Scrape timed out — extension may not be installed');
+      resolve([]);
+    }, 60000);
+
+    addedByScrapeRequests.set(requestId, { resolve, timeout });
+    window.postMessage({
+      type: 'FROM_PAGE_SCRAPE_PLAYLIST_ADDED_BY',
+      playlistUrl,
+      totalTracks,
+      requestId
+    }, '*');
+  });
+}
+
+async function applyScrapedAddedBy(playlistUrl, onStatus) {
+  if (!allTracks.length) return;
+  if (onStatus) onStatus('Scraping “Added by” from Spotify…');
+
+  try {
+    const scraped = await requestPlaylistAddedByScrape(playlistUrl, allTracks.length);
+    if (!scraped || !scraped.length) {
+      if (onStatus) onStatus('');
+      return;
+    }
+
+    let filled = 0;
+    scraped.forEach(({ index, addedByName }) => {
+      if (index >= 0 && index < allTracks.length && addedByName) {
+        const track = allTracks[index];
+        if (!track.addedBy || !track.addedBy.name) {
+          track.addedBy = { id: '', name: addedByName, url: '', image: '' };
+          filled++;
+        }
+      }
+    });
+
+    if (onStatus) onStatus('');
+    if (filled > 0) {
+      renderResults();
+      showToast(`✓ Added by: ${filled} contributor${filled === 1 ? '' : 's'} auto-filled from Spotify.`);
+    }
+  } catch (err) {
+    console.warn('[AddedBy] Scrape error:', err.message);
+    if (onStatus) onStatus('');
+  }
+}
+
 // ─── Google AI Mode Extension Handler ──────────
 
 let hasExtension = false;
 const pendingRequests = new Map();
+const addedByScrapeRequests = new Map();
 
 function checkExtensionPresence() {
   const isNativeExt = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage;
@@ -1851,8 +2069,32 @@ async function startGoogleAiLanguageDetection() {
 }
 
 // Listen to webpage postMessage channel from content script
+const spotifyProfileRequests = new Map();
+
 window.addEventListener("message", (event) => {
   if (event.source !== window) return;
+
+  if (event.data?.type === "FROM_EXT_SPOTIFY_PROFILES_RESPONSE") {
+    const { ok, profiles, error, requestId } = event.data;
+    const pending = spotifyProfileRequests.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timeout);
+      spotifyProfileRequests.delete(requestId);
+      if (!ok) console.warn('[Spotify] Profile scrape response failed:', error);
+      pending.resolve(ok ? (profiles || {}) : {});
+    }
+  }
+
+  if (event.data?.type === "FROM_EXT_SCRAPE_ADDED_BY_RESPONSE") {
+    const { ok, tracks, error, requestId } = event.data;
+    const pending = addedByScrapeRequests.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timeout);
+      addedByScrapeRequests.delete(requestId);
+      if (!ok) console.warn('[AddedBy] Scrape response failed:', error);
+      pending.resolve(ok ? (tracks || []) : []);
+    }
+  }
 
   if (event.data?.type === "PONG_PLAYLIST_EXPORTER_EXT") {
     hasExtension = true;
