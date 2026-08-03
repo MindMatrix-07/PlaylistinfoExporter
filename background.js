@@ -448,38 +448,43 @@ function scrapeSpotifyPlaylistDOM(totalTracks) {
   }
 
   function getTrackNumber(row) {
-    // Strategy A: aria-rowindex on the row itself (1-based)
-    const selfIdx = parseInt(row.getAttribute('aria-rowindex') || '0', 10);
-    if (selfIdx > 0) return selfIdx - 1;
-
-    // Strategy B: closest ancestor with aria-rowindex
-    const anc = row.closest('[aria-rowindex]');
-    if (anc && anc !== row) {
-      const idx = parseInt(anc.getAttribute('aria-rowindex') || '0', 10);
-      if (idx > 0) return idx - 1;
-    }
-
-    // Strategy C: read the # column (col 1) — try leaf spans first to avoid
-    // picking up SVG icon text when the row is hovered
+    // ── Strategy A: visible # column text (MOST RELIABLE) ────────────────────
+    // The # column always shows the 1-based track number as visible text ("1","2"…)
+    // and is immune to the aria-rowindex header-offset problem.
     const numCell = row.querySelector('[aria-colindex="1"]');
     if (numCell) {
-      // First try text of leaf spans (number is usually in a span child)
+      // Try leaf spans first — the number is usually in a child <span>
+      // Avoids picking up SVG icon text injected on hover
       const spans = numCell.querySelectorAll('span');
       for (const s of spans) {
         if (s.children.length > 0) continue;
         const digits = (s.textContent || '').replace(/[^\d]/g, '').trim();
         const n = parseInt(digits, 10);
-        if (n > 0) return n - 1;
+        if (n > 0) return n - 1; // 0-based
       }
-      // Fallback: all text in the cell
+      // Fallback: all text in the cell (when spans aren't available)
       const digits = (numCell.innerText || numCell.textContent || '')
         .replace(/[^\d]/g, '').trim();
       const n = parseInt(digits, 10);
       if (n > 0) return n - 1;
     }
 
-    return -1; // unknown — caller should use DOM position
+    // ── Strategy B: aria-rowindex − 2 ────────────────────────────────────────
+    // Spotify counts the header row as aria-rowindex=1, so Track 1 = 2, Track 2 = 3…
+    // We subtract 2 (not 1) to get a 0-based track index.
+    const selfIdx = parseInt(row.getAttribute('aria-rowindex') || '0', 10);
+    if (selfIdx > 1) return selfIdx - 2;
+
+    // ── Strategy C: ancestor aria-rowindex − 2 ───────────────────────────────
+    const anc = row.closest('[aria-rowindex]');
+    if (anc && anc !== row) {
+      const idx = parseInt(anc.getAttribute('aria-rowindex') || '0', 10);
+      if (idx > 1) return idx - 2;
+    }
+
+    return -1; // unknown — caller will use DOM position
   }
+
 
   function findScrollContainer() {
     // Walk upward from the first track row to find the real scrollable ancestor
