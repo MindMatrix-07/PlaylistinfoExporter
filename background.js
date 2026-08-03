@@ -459,17 +459,28 @@ function scrapeSpotifyPlaylistDOM(totalTracks) {
     ) || document.documentElement;
   }
 
+  // Returns true only for actual track data rows (not the header row)
+  function isTrackRow(row) {
+    // Header row contains role="columnheader" cells — skip it
+    if (row.querySelector('[role="columnheader"]')) return false;
+    // Must have at least one [aria-colindex] child to be a real grid row
+    if (!row.querySelector('[aria-colindex]')) return false;
+    return true;
+  }
+
   return new Promise(async (resolve) => {
     const trackMap = new Map(); // index → {index, addedByName}
 
-    // First pass on already-visible rows
+    // First pass on already-visible rows (skip the column-header row)
     const initialRows = Array.from(
       document.querySelectorAll('[data-testid="tracklist-row"]')
-    );
+    ).filter(isTrackRow);
     initialRows.forEach((row, i) => {
       const idx = getTrackNumber(row);
       const key = idx >= 0 ? idx : i;
-      if (!trackMap.has(key)) {
+      // Overwrite a slot only if we have a better (non-empty) name
+      const existing = trackMap.get(key);
+      if (!existing || (!existing.addedByName && getAddedByFromRow(row))) {
         trackMap.set(key, { index: key, addedByName: getAddedByFromRow(row) });
       }
     });
@@ -487,17 +498,18 @@ function scrapeSpotifyPlaylistDOM(totalTracks) {
         scrollEl.scrollTop += SCROLL_STEP;
         await sleep(SCROLL_DELAY);
 
-        // Capture newly rendered rows
+        // Capture newly rendered rows (skip header row)
         const rows = Array.from(
           document.querySelectorAll('[data-testid="tracklist-row"]')
-        );
+        ).filter(isTrackRow);
         rows.forEach((row, domPos) => {
           const idx = getTrackNumber(row);
-          // Only use DOM position as key if we couldn't detect the track number
-          // AND the position is plausible given what we've already captured
           const key = idx >= 0 ? idx : (trackMap.size + domPos);
-          if (!trackMap.has(key)) {
-            trackMap.set(key, { index: key, addedByName: getAddedByFromRow(row) });
+          const name = getAddedByFromRow(row);
+          // Insert new, or overwrite if previous entry had no name
+          const existing = trackMap.get(key);
+          if (!existing || (!existing.addedByName && name)) {
+            trackMap.set(key, { index: key, addedByName: name });
           }
         });
 
