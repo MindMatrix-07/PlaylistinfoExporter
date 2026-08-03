@@ -278,31 +278,71 @@ async function scrapePlaylistAddedBy(playlistUrl, totalTracks) {
   const playlistId = playlistUrl.match(/playlist\/([A-Za-z0-9]+)/)?.[1] || '';
   if (!playlistId) throw new Error('Could not extract playlist ID');
 
+  // Always use nd=1 to suppress the "Open Spotify?" protocol-handler dialog
+  const safeUrl = (() => {
+    try {
+      const u = new URL(playlistUrl);
+      u.searchParams.set('nd', '1');
+      return u.href;
+    } catch { return playlistUrl; }
+  })();
+
+  // Remember which tab is currently active so we can return to it later
+  const [originalTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
   // Find an existing Spotify tab with this playlist
   const allTabs = await chrome.tabs.query({ url: 'https://open.spotify.com/*' });
-  let spotifyTab = allTabs.find(t =>
-    t.url && t.url.includes(playlistId)
-  ) || allTabs[0] || null;
+  let spotifyTab = allTabs.find(t => t.url && t.url.includes(playlistId))
+    || allTabs[0]
+    || null;
 
   let openedTab = false;
   if (!spotifyTab) {
-    addAiDebug('bg', 'No Spotify tab found — opening one', { playlistUrl });
-    spotifyTab = await chrome.tabs.create({ url: playlistUrl, active: false });
+    addAiDebug('bg', 'No Spotify tab found — opening one', { safeUrl });
+    // Open in background first, then we'll activate it below
+    spotifyTab = await chrome.tabs.create({ url: safeUrl, active: false });
     openedTab = true;
     await waitForTabComplete(spotifyTab.id);
-    // Extra wait for Spotify SPA to render the tracklist
-    await new Promise(r => setTimeout(r, 4000));
-  } else {
-    // Navigate to the correct playlist URL if needed
-    if (spotifyTab.url && !spotifyTab.url.includes(playlistId)) {
-      await chrome.tabs.update(spotifyTab.id, { url: playlistUrl });
-      await waitForTabComplete(spotifyTab.id);
-      await new Promise(r => setTimeout(r, 4000));
-    } else {
-      // Already on the right page — give it a moment to be ready
-      await new Promise(r => setTimeout(r, 1000));
-    }
+  } else if (spotifyTab.url && !spotifyTab.url.includes(playlistId)) {
+    await chrome.tabs.update(spotifyTab.id, { url: safeUrl });
+    await waitForTabComplete(spotifyTab.id);
   }
+
+  // ── Switch focus to the Spotify tab so the virtual list renders ───────────
+  await chrome.tabs.update(spotifyTab.id, { active: true });
+  // Bring its window to the front too
+  await chrome.windows.update(spotifyTab.windowId, { focused: true }).catch(() => {});
+
+  // ── Dismiss "Open Spotify?" dialog if present ─────────────────────────────
+  // Inject a small script that clicks the Cancel button in Spotify's
+  // protocol-handler modal (a DOM overlay, not a browser native dialog).
+  await chrome.scripting.executeScript({
+    target: { tabId: spotifyTab.id },
+    func: () => {
+      // The dialog has a button whose text is "Cancel" or "Abbrechen" etc.
+      const buttons = Array.from(document.querySelectorAll('button'));
+      const cancel = buttons.find(b =>
+        /cancel|dismiss|close/i.test(b.textContent.trim())
+      );
+      if (cancel) cancel.click();
+    }
+  }).catch(() => {});
+
+  // ── Wait for the tracklist to actually render ─────────────────────────────
+  // Poll until at least one [data-testid="tracklist-row"] appears (max 10 s)
+  const READY_TIMEOUT = 10000;
+  const READY_POLL   = 400;
+  const readyStart   = Date.now();
+  while (Date.now() - readyStart < READY_TIMEOUT) {
+    const [check] = await chrome.scripting.executeScript({
+      target: { tabId: spotifyTab.id },
+      func: () => document.querySelectorAll('[data-testid="tracklist-row"]').length
+    }).catch(() => [{ result: 0 }]);
+    if ((check?.result || 0) >= 2) break;  // ≥2 means at least 1 real track row
+    await new Promise(r => setTimeout(r, READY_POLL));
+  }
+  // Extra settle time for the Added-by avatars/links to render
+  await new Promise(r => setTimeout(r, 1200));
 
   try {
     const [result] = await chrome.scripting.executeScript({
@@ -317,11 +357,18 @@ async function scrapePlaylistAddedBy(playlistUrl, totalTracks) {
     });
     return data;
   } finally {
+    // ── Close the tab we opened (if any) ─────────────────────────────────
     if (openedTab && spotifyTab?.id) {
       await chrome.tabs.remove(spotifyTab.id).catch(() => {});
     }
+    // ── Return focus to the exporter tab ─────────────────────────────────
+    if (originalTab?.id) {
+      await chrome.tabs.update(originalTab.id, { active: true }).catch(() => {});
+      await chrome.windows.update(originalTab.windowId, { focused: true }).catch(() => {});
+    }
   }
 }
+
 
 /**
  * Injected into the Spotify tab — reads the rendered tracklist DOM.
