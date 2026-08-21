@@ -264,9 +264,13 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
   console.log(`[credits.fm] Looking up ISRC for ${trackId || lookupUrl}`);
   const creditsFmResult = await fetchCreditsFmISRC(lookupUrl);
   if (creditsFmResult?.isrc) {
+    // If credits.fm didn't return cover art, enrich via Spotify oEmbed (always works, no auth)
+    const albumArt = creditsFmResult.albumArt ||
+      await fetchSpotifyOembedAlbumArt(trackId) ||
+      playlistImage;
     return {
       isrc: creditsFmResult.isrc,
-      albumArt: creditsFmResult.albumArt || playlistImage,
+      albumArt,
       albumName: creditsFmResult.albumName || 'Unknown Album',
       trackUrl: trackUrl || lookupUrl,
       lookupStatus: 'credits_fm_ok'
@@ -285,9 +289,12 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     if (resp.ok) {
       const data = await resp.json().catch(() => ({}));
       if (data.isrc) {
+        const albumArt = data.artwork_url ||
+          await fetchSpotifyOembedAlbumArt(trackId) ||
+          playlistImage;
         return {
           isrc: data.isrc,
-          albumArt: data.artwork_url || playlistImage,
+          albumArt,
           albumName: data.album || 'Unknown Album',
           trackUrl: trackUrl || lookupUrl,
           lookupStatus: 'soundplate_ok'
@@ -298,15 +305,33 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     console.warn(`[Soundplate] ${e.name === 'AbortError' ? 'Timed out' : e.message} — ${trackId || lookupUrl}`);
   }
 
+  // Last resort: still fetch album art via oEmbed even if ISRC lookup failed
+  const fallbackArt = await fetchSpotifyOembedAlbumArt(trackId) || playlistImage;
   return {
     ...EMPTY_DETAILS,
-    albumArt: playlistImage,
+    albumArt: fallbackArt,
     trackUrl: trackUrl || lookupUrl,
     lookupStatus: 'no_isrc'
   };
 }
 
-// credits.fm public search API — primary ISRC source
+// Spotify oEmbed API — free, public, no auth needed.
+// Returns album art (thumbnail_url) for any Spotify track URL.
+// Works 100% of the time regardless of whether the track is in credits.fm.
+async function fetchSpotifyOembedAlbumArt(trackId) {
+  if (!trackId) return null;
+  try {
+    const oembedUrl = `https://open.spotify.com/oembed?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2F${trackId}`;
+    const res = await fetchWithTimeout(oembedUrl, {}, 4000);
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    return data?.thumbnail_url || null;
+  } catch (e) {
+    console.warn('[oEmbed] Album art fetch failed:', e.message);
+    return null;
+  }
+}
+
 // Discovered via HAR analysis of isrc.fm. No auth needed.
 // Pass the full Spotify URL including ?si= — it handles it correctly.
 //

@@ -1000,7 +1000,27 @@ async function resolveOneWebFetchTrack(track, index) {
         }
       }
     } catch (fallbackErr) {
-      console.warn('[Web Fetch] Client-side fallback failed:', track.name, fallbackErr.message);
+      console.warn('[Web Fetch] Client-side credits.fm fallback failed:', track.name, fallbackErr.message);
+    }
+  }
+
+  // Client-side oEmbed album art fetch — always runs if albumArt is still missing.
+  // Spotify oEmbed is free, public, no auth, and returns album art for every track.
+  if (!track.albumArt) {
+    try {
+      const trackId = track.url ? track.url.split('/track/').pop().split('?')[0] : null;
+      if (trackId) {
+        const oembedResp = await fetch(`https://open.spotify.com/oembed?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2F${trackId}`);
+        if (oembedResp.ok) {
+          const oembedData = await oembedResp.json();
+          if (oembedData?.thumbnail_url) {
+            track.albumArt = oembedData.thumbnail_url;
+            updateRenderedTrackDetails(track, index);
+          }
+        }
+      }
+    } catch (oembedErr) {
+      console.warn('[Web Fetch] oEmbed album art fallback failed:', track.name, oembedErr.message);
     }
   }
 }
@@ -1016,6 +1036,13 @@ function updateRenderedTrackDetails(track, index) {
   if (album) {
     album.textContent = track.album || '';
     album.title = track.album || '';
+  }
+
+  // Update album art thumbnail if we now have a URL (class used in renderResults template)
+  const thumb = row.querySelector('img.track-thumb, img.song-art');
+  if (thumb && track.albumArt) {
+    thumb.src = track.albumArt;
+    thumb.style.display = '';
   }
 }
 
