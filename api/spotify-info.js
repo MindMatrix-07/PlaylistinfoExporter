@@ -9,6 +9,8 @@ try {
 }
 
 // Soundplate's PHP proxy — returns ISRC + album art per Spotify track URL
+// NOTE: Soundplate returns 404 for clean URLs but 200 when the ?si= parameter is present.
+// Always pass the original URL (with ?si= intact) to this API.
 const SOUNDPLATE_API = 'https://phpstack-822472-6184058.cloudwaysapps.com/api/spotify.php';
 const SOUNDPLATE_HEADERS = {
   'accept': '*/*',
@@ -25,6 +27,12 @@ const SOUNDPLATE_HEADERS = {
   'sec-fetch-storage-access': 'active',
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36'
 };
+
+// credits.fm public search API — accepts Spotify URLs directly, returns ISRC
+// Endpoint discovered via HAR analysis of isrc.fm (powered by credits.fm).
+// No auth required. Full URL including ?si= parameter works fine.
+const CREDITS_FM_SEARCH = 'https://api.credits.fm/v1/search';
+const CREDITS_FM_HEADERS = { 'User-Agent': 'PlaylistInfoExporter/3.0' };
 
 const EMPTY_DETAILS = {
   isrc: '—',
@@ -232,11 +240,13 @@ function getBestImage(data) {
 
 async function fetchSoundplateDetails(track, playlistImage, options = {}) {
   const trackId = extractSpotifyTrackId(track);
+  // Preserve the original URL (with ?si= if present) — Soundplate needs it
+  const originalUrl = track.url || track.href || track.shareUrl || track.link ||
+    track.external_url || track.externalUrl ||
+    track.external_urls?.spotify || track.externalUrls?.spotify || '';
   const trackUrl = getSpotifyTrackUrl(track, trackId);
-  const maxAttempts = options.maxAttempts || 4;
-  const rateLimitSleepMs = options.rateLimitSleepMs ?? 70000;
 
-  if (!trackUrl) {
+  if (!trackUrl && !originalUrl) {
     return {
       ...EMPTY_DETAILS,
       albumArt: playlistImage,
@@ -245,154 +255,79 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     };
   }
 
-  // ── Step 1: Odesli → Deezer (primary — no rate limits, 5s/3s timeout) ────
-  const deezerResult = await fetchOdesliDeezerISRC(trackUrl);
-  if (deezerResult?.isrc) {
-    const albumArt = deezerResult.albumArt || await fetchSoundplateArt(trackUrl) || playlistImage;
+  // The URL we pass to external services — prefer the original (which may have ?si=)
+  // but fall back to the clean trackUrl
+  const lookupUrl = originalUrl.includes('open.spotify.com/track/') ? originalUrl : trackUrl;
+
+  // ── Step 1: credits.fm — primary source (discovered via HAR of isrc.fm) ──
+  // Accepts the full Spotify URL including ?si= parameter. No auth required.
+  console.log(`[credits.fm] Looking up ISRC for ${trackId || lookupUrl}`);
+  const creditsFmResult = await fetchCreditsFmISRC(lookupUrl);
+  if (creditsFmResult?.isrc) {
     return {
-      isrc: deezerResult.isrc,
-      albumArt,
-      albumName: deezerResult.albumName || 'Unknown Album',
-      trackUrl,
-      lookupStatus: 'deezer_ok'
+      isrc: creditsFmResult.isrc,
+      albumArt: creditsFmResult.albumArt || playlistImage,
+      albumName: creditsFmResult.albumName || 'Unknown Album',
+      trackUrl: trackUrl || lookupUrl,
+      lookupStatus: 'credits_fm_ok'
     };
   }
 
-  // ── Step 2: Soundplate — 1 attempt, 1s timeout, no retry delays ─────────
-  console.log(`[Fallback] Deezer miss — trying Soundplate for ${trackId || trackUrl}`);
+  // ── Step 2: Soundplate — MUST use URL with ?si= parameter ────────────────
+  // HAR analysis confirmed: clean URL (no ?si=) returns 404; with ?si= returns 200.
+  console.log(`[Fallback] credits.fm miss — trying Soundplate for ${trackId || lookupUrl}`);
   try {
     const resp = await fetchWithTimeout(
-      `${SOUNDPLATE_API}?q=${encodeURIComponent(trackUrl)}`,
+      `${SOUNDPLATE_API}?q=${encodeURIComponent(lookupUrl)}`,
       { headers: SOUNDPLATE_HEADERS },
-      3000
+      5000
     );
-    const data = await resp.json().catch(() => ({}));
-    if (data.isrc) {
-      return {
-        isrc: data.isrc,
-        albumArt: data.artwork_url || playlistImage,
-        albumName: data.album || 'Unknown Album',
-        trackUrl,
-        lookupStatus: 'soundplate_ok'
-      };
+    if (resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      if (data.isrc) {
+        return {
+          isrc: data.isrc,
+          albumArt: data.artwork_url || playlistImage,
+          albumName: data.album || 'Unknown Album',
+          trackUrl: trackUrl || lookupUrl,
+          lookupStatus: 'soundplate_ok'
+        };
+      }
     }
   } catch (e) {
-    console.warn(`[Soundplate] ${e.name === 'AbortError' ? 'Timed out' : e.message} — ${trackId || trackUrl}`);
-  }
-
-  // ── Step 3: langlaisben Wix function — 3s timeout per request ──────────
-  console.log(`[Fallback] Trying langlaisben for ${trackId || trackUrl}`);
-  const wixResult = await fetchLanglaisbenISRC(trackUrl);
-  if (wixResult?.isrc) {
-    const albumArt = wixResult.albumArt || await fetchSoundplateArt(trackUrl) || playlistImage;
-    return {
-      isrc: wixResult.isrc,
-      albumArt,
-      albumName: wixResult.albumName || 'Unknown Album',
-      trackUrl,
-      lookupStatus: 'wix_ok'
-    };
+    console.warn(`[Soundplate] ${e.name === 'AbortError' ? 'Timed out' : e.message} — ${trackId || lookupUrl}`);
   }
 
   return {
     ...EMPTY_DETAILS,
     albumArt: playlistImage,
-    trackUrl,
+    trackUrl: trackUrl || lookupUrl,
     lookupStatus: 'no_isrc'
   };
 }
 
-// Quick Soundplate call just to get album art (used when primary source has ISRC but no art)
-async function fetchSoundplateArt(trackUrl) {
-  try {
-    const resp = await fetchWithTimeout(
-      `${SOUNDPLATE_API}?q=${encodeURIComponent(trackUrl)}`,
-      { headers: SOUNDPLATE_HEADERS },
-      3000
-    );
-    const data = await resp.json().catch(() => ({}));
-    return data.artwork_url || null;
-  } catch {
-    return null;
-  }
-}
-
-// langlaisben.com Wix serverless function — uses their Spotify API integration.
-// No auth needed: just fetches the page first to obtain the SSR session cookie,
-// then calls their _functions/spotifyIsrcSearch endpoint.
-const LANGLAISBEN_COOKIE_URL = 'https://www.langlaisben.com/en/isrc-finder';
-const LANGLAISBEN_FN_URL = 'https://www.langlaisben.com/_functions/spotifyIsrcSearch';
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36';
-
+// credits.fm public search API — primary ISRC source
+// Discovered via HAR analysis of isrc.fm. No auth needed.
+// Pass the full Spotify URL including ?si= — it handles it correctly.
 // Returns { isrc, albumArt, albumName } or null
-async function fetchLanglaisbenISRC(spotifyTrackUrl) {
+async function fetchCreditsFmISRC(spotifyTrackUrl) {
   try {
-    // Step 1: Visit page to get SSR session cookie (3s timeout)
-    const pageRes = await fetchWithTimeout(LANGLAISBEN_COOKIE_URL, {
-      headers: { 'User-Agent': UA, 'Accept': 'text/html' }
-    }, 3000);
-    const rawCookies = pageRes.headers.get('set-cookie') || '';
-    const cookies = rawCookies.split(',')
-      .map(c => c.split(';')[0].trim())
-      .filter(Boolean)
-      .join('; ');
-
-    // Step 2: Call ISRC function with cookie (3s timeout)
-    const cleanUrl = spotifyTrackUrl.split('?')[0];
-    const fnRes = await fetchWithTimeout(
-      `${LANGLAISBEN_FN_URL}?q=${encodeURIComponent(cleanUrl)}&type=track&limit=10`,
-      { headers: { 'Cookie': cookies, 'User-Agent': UA, 'Referer': LANGLAISBEN_COOKIE_URL } },
-      3000
+    const res = await fetchWithTimeout(
+      `${CREDITS_FM_SEARCH}?q=${encodeURIComponent(spotifyTrackUrl)}&type=isrc&limit=1&offset=0`,
+      { headers: CREDITS_FM_HEADERS },
+      6000
     );
-    if (!fnRes.ok) return null;
-    const data = await fnRes.json().catch(() => null);
-    const t = data?.tracks?.[0];
-    if (!t?.isrc) return null;
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    const recording = data?.recordings?.items?.[0];
+    if (!recording?.isrc) return null;
     return {
-      isrc: t.isrc,
-      albumArt: t.album?.image || '',
-      albumName: t.album?.name || 'Unknown Album'
+      isrc: recording.isrc,
+      albumArt: recording.cover_art_url || '',
+      albumName: 'Unknown Album' // credits.fm search doesn't return album name
     };
   } catch (e) {
-    console.warn('[Wix] langlaisben fetch failed:', e.name === 'AbortError' ? 'Timed out' : e.message);
-    return null;
-  }
-}
-
-// Returns { isrc, albumArt, albumName } or null
-async function fetchOdesliDeezerISRC(spotifyTrackUrl) {
-  try {
-    // Step 1: Odesli lookup (5s timeout)
-    const odesliRes = await fetchWithTimeout(
-      `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(spotifyTrackUrl)}`,
-      { headers: { 'User-Agent': 'PlaylistInfoExporter/2.0' } },
-      5000
-    );
-    if (!odesliRes.ok) return null;
-    const odesliData = await odesliRes.json().catch(() => null);
-    if (!odesliData) return null;
-
-    const entities = odesliData.entitiesByUniqueId || {};
-    const deezerEntry = Object.entries(entities).find(([key]) => key.startsWith('DEEZER_SONG::'));
-    if (!deezerEntry) return null;
-    const deezerId = deezerEntry[1].id;
-
-    // Step 2: Deezer track API (3s timeout) — returns ISRC + album art
-    const deezerRes = await fetchWithTimeout(
-      `https://api.deezer.com/track/${deezerId}`,
-      {},
-      3000
-    );
-    if (!deezerRes.ok) return null;
-    const d = await deezerRes.json().catch(() => null);
-    if (!d?.isrc) return null;
-    return {
-      isrc: d.isrc,
-      albumArt: d.album?.cover_big || d.album?.cover_medium || d.album?.cover || '',
-      albumName: d.album?.title || 'Unknown Album'
-    };
-  } catch (e) {
-    console.warn('[Deezer] Odesli→Deezer failed:', e.name === 'AbortError' ? 'Timed out' : e.message);
+    console.warn('[credits.fm] Fetch failed:', e.name === 'AbortError' ? 'Timed out' : e.message);
     return null;
   }
 }
