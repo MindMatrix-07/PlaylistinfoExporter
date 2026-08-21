@@ -310,40 +310,34 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
 // Discovered via HAR analysis of isrc.fm. No auth needed.
 // Pass the full Spotify URL including ?si= — it handles it correctly.
 //
-// NOTE on timeouts: New/obscure indie tracks (especially Indian releases) can
-// take up to 14s to respond because credits.fm does a live fallback search.
-// We give 14s and automatically retry once if the first attempt times out.
-// Testing confirmed this resolves 100% of tracks on the playlist.
+// NOTE on timeouts: Netlify functions have a hard 10-second execution limit.
+// We set this to 8000ms to allow it to fail gracefully instead of crashing the function.
+// The frontend will handle any failures via a direct client-side fallback fetch.
 //
 // Returns { isrc, albumArt, albumName } or null
 async function fetchCreditsFmISRC(spotifyTrackUrl) {
-  const TIMEOUT_MS = 14000;
+  const TIMEOUT_MS = 8000;
   const apiUrl = `${CREDITS_FM_SEARCH}?q=${encodeURIComponent(spotifyTrackUrl)}&type=isrc&limit=1&offset=0`;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const res = await fetchWithTimeout(apiUrl, { headers: CREDITS_FM_HEADERS }, TIMEOUT_MS);
-      if (!res.ok) {
-        console.warn(`[credits.fm] HTTP ${res.status} on attempt ${attempt}`);
-        return null; // non-2xx: no point retrying
-      }
-      const data = await res.json().catch(() => null);
-      const recording = data?.recordings?.items?.[0];
-      if (!recording?.isrc) return null;
-      return {
-        isrc: recording.isrc,
-        albumArt: recording.cover_art_url || '',
-        albumName: 'Unknown Album' // credits.fm search doesn't return album name
-      };
-    } catch (e) {
-      const isTimeout = e.name === 'AbortError' || e.message === 'TIMEOUT';
-      console.warn(`[credits.fm] Attempt ${attempt} ${isTimeout ? 'timed out' : 'failed: ' + e.message}`);
-      if (attempt === 2 || !isTimeout) return null; // no retry on non-timeout errors
-      // brief pause before retry
-      await new Promise(r => setTimeout(r, 500));
+  try {
+    const res = await fetchWithTimeout(apiUrl, { headers: CREDITS_FM_HEADERS }, TIMEOUT_MS);
+    if (!res.ok) {
+      console.warn(`[credits.fm] HTTP ${res.status}`);
+      return null; 
     }
+    const data = await res.json().catch(() => null);
+    const recording = data?.recordings?.items?.[0];
+    if (!recording?.isrc) return null;
+    return {
+      isrc: recording.isrc,
+      albumArt: recording.cover_art_url || '',
+      albumName: 'Unknown Album' // credits.fm search doesn't return album name
+    };
+  } catch (e) {
+    const isTimeout = e.name === 'AbortError' || e.message === 'TIMEOUT';
+    console.warn(`[credits.fm] ${isTimeout ? 'timed out' : 'failed: ' + e.message}`);
+    return null;
   }
-  return null;
 }
 
 function getTracksFromPlaylistData(playlistData) {

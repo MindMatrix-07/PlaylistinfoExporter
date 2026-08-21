@@ -970,16 +970,38 @@ async function resolveOneWebFetchTrack(track, index) {
   try {
     const apiUrl = `/api/spotify-track-details?url=${encodeURIComponent(track.url)}&albumArt=${encodeURIComponent(track.albumArt || '')}`;
     const resp = await fetch(apiUrl);
-    if (!resp.ok) return;
-    const details = await resp.json();
-    track.isrc = details.isrc || track.isrc || '—';
-    track.album = details.albumName || track.album || '';
-    track.albumArt = details.albumArt || track.albumArt || '';
-    track.url = details.trackUrl || track.url;
-    track.lookupStatus = details.lookupStatus || '';
-    updateRenderedTrackDetails(track, index);
+    if (resp.ok) {
+      const details = await resp.json();
+      track.isrc = details.isrc || track.isrc || '—';
+      track.album = details.albumName || track.album || '';
+      track.albumArt = details.albumArt || track.albumArt || '';
+      track.url = details.trackUrl || track.url;
+      track.lookupStatus = details.lookupStatus || '';
+      updateRenderedTrackDetails(track, index);
+    }
   } catch (err) {
     console.warn('[Web Fetch] Track details failed:', track.name, err.message);
+  }
+
+  // Client-side fallback for Netlify timeouts (Netlify limits execution to 10s)
+  // Obscure tracks can take 14s+ on credits.fm, so we fetch directly from the browser
+  // which bypasses serverless execution limits since credits.fm allows CORS.
+  if (!track.isrc || track.isrc === '—') {
+    try {
+      const fallbackUrl = `https://api.credits.fm/v1/search?q=${encodeURIComponent(track.url)}&type=isrc&limit=1&offset=0`;
+      const fallbackResp = await fetch(fallbackUrl);
+      if (fallbackResp.ok) {
+        const fallbackData = await fallbackResp.json();
+        const recording = fallbackData?.recordings?.items?.[0];
+        if (recording?.isrc) {
+          track.isrc = recording.isrc;
+          track.albumArt = track.albumArt || recording.cover_art_url || '';
+          updateRenderedTrackDetails(track, index);
+        }
+      }
+    } catch (fallbackErr) {
+      console.warn('[Web Fetch] Client-side fallback failed:', track.name, fallbackErr.message);
+    }
   }
 }
 
