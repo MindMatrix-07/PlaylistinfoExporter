@@ -268,10 +268,17 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     const albumArt = creditsFmResult.albumArt ||
       await fetchSpotifyOembedAlbumArt(trackId) ||
       playlistImage;
+    
+    // credits.fm doesn't return album names, so fetch it directly from Spotify
+    let albumName = creditsFmResult.albumName;
+    if (!albumName || albumName === 'Unknown Album') {
+      albumName = await fetchSpotifyAlbumName(trackId) || 'Unknown Album';
+    }
+
     return {
       isrc: creditsFmResult.isrc,
       albumArt,
-      albumName: creditsFmResult.albumName || 'Unknown Album',
+      albumName,
       trackUrl: trackUrl || lookupUrl,
       lookupStatus: 'credits_fm_ok'
     };
@@ -292,10 +299,16 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
         const albumArt = data.artwork_url ||
           await fetchSpotifyOembedAlbumArt(trackId) ||
           playlistImage;
+        
+        let albumName = data.album;
+        if (!albumName || albumName === 'Unknown Album') {
+          albumName = await fetchSpotifyAlbumName(trackId) || 'Unknown Album';
+        }
+
         return {
           isrc: data.isrc,
           albumArt,
-          albumName: data.album || 'Unknown Album',
+          albumName,
           trackUrl: trackUrl || lookupUrl,
           lookupStatus: 'soundplate_ok'
         };
@@ -307,9 +320,12 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
 
   // Last resort: still fetch album art via oEmbed even if ISRC lookup failed
   const fallbackArt = await fetchSpotifyOembedAlbumArt(trackId) || playlistImage;
+  const fallbackAlbumName = await fetchSpotifyAlbumName(trackId) || 'Unknown Album';
+
   return {
     ...EMPTY_DETAILS,
     albumArt: fallbackArt,
+    albumName: fallbackAlbumName,
     trackUrl: trackUrl || lookupUrl,
     lookupStatus: 'no_isrc'
   };
@@ -328,6 +344,34 @@ async function fetchSpotifyOembedAlbumArt(trackId) {
     return data?.thumbnail_url || null;
   } catch (e) {
     console.warn('[oEmbed] Album art fetch failed:', e.message);
+    return null;
+  }
+}
+
+// Fetches album name by parsing the og:description meta tag on Spotify's track page.
+// The description format is typically: "Artist · AlbumName · Song · Year"
+async function fetchSpotifyAlbumName(trackId) {
+  if (!trackId) return null;
+  try {
+    const res = await fetchWithTimeout(`https://open.spotify.com/track/${trackId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    }, 4000);
+    if (!res.ok) return null;
+    const html = await res.text();
+    const descMatch = html.match(/property="og:description"\s+content="([^"]+)"/);
+    if (!descMatch) return null;
+    const parts = descMatch[1].split(' \u00b7 '); // Split by ' · '
+    if (parts.length >= 3) {
+      const typeIndex = parts.findIndex(p => p === 'Song' || p === 'Single' || p === 'EP');
+      if (typeIndex > 1) return parts[typeIndex - 1].trim(); // album name is just before "Song/Single/EP"
+      return parts[1].trim(); // fallback: usually the second part
+    }
+    return null;
+  } catch (e) {
+    console.warn('[OG Parse] Album name fetch failed:', e.message);
     return null;
   }
 }
