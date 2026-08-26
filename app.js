@@ -1110,11 +1110,6 @@ async function resolveWebFetchTrackDetails() {
     await Promise.all(oembedPromises);
   }
 
-    await resolveOneWebFetchTrack(item.track, item.index);
-    completed++;
-    setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
-  }
-
   await enrichMissingPreviewUrls();
   await enrichAddedByProfiles(null, allTracks);
   setLoading(false);
