@@ -72,7 +72,7 @@ async function getSpotifyAnonToken(sampleTrackId) {
   return null;
 }
 
-// 100% Free Public Fallback Engine for tracks when Spotify API hits 429
+// 100% Free Parallel Resolution Engine for tracks when Spotify API hits 429
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -94,30 +94,34 @@ async function resolveTrackFreeFallback(trackId) {
 
     const title = entity.title || entity.name || '';
     const artist = entity.artists?.[0]?.name || '';
-    const albumArt = entity.visualIdentity?.image?.[0]?.url || '';
-    let isrc = '';
+    let albumArt = entity.visualIdentity?.image?.[0]?.url || '';
+    let albumName = title;
+    let isrc = '—';
 
     if (title && artist) {
       const cleanTitle = title.split('(')[0].split('-')[0].trim();
-      const q = `recording:"${cleanTitle}" AND artist:"${artist.trim()}"`;
-      const mbUrl = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(q)}&fmt=json&limit=1`;
-      try {
-        const r2 = await fetch(mbUrl, {
-          headers: { 'User-Agent': 'PlaylistInfoExporter/5.7 (https://playlistinfoexporter.netlify.app)' }
-        });
-        if (r2.ok) {
-          const d2 = await r2.json();
-          const first = d2.recordings?.[0];
-          if (first?.isrcs?.length) {
-            isrc = first.isrcs[0];
-          }
-        }
-      } catch (e) {}
+      
+      const [itunesRes, mbRes] = await Promise.allSettled([
+        fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + artist)}&entity=song&limit=1`).then(res => res.json()),
+        fetch(`https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(`recording:"${cleanTitle}" AND artist:"${artist}"`)}&fmt=json&limit=1`, {
+          headers: { 'User-Agent': 'PlaylistInfoExporter/5.9 (https://playlistinfoexporter.netlify.app)' }
+        }).then(res => res.json())
+      ]);
+
+      if (itunesRes.status === 'fulfilled' && itunesRes.value?.results?.[0]) {
+        const match = itunesRes.value.results[0];
+        if (match.collectionName) albumName = match.collectionName;
+        if (match.artworkUrl100) albumArt = match.artworkUrl100.replace('100x100bb', '600x600bb');
+      }
+
+      if (mbRes.status === 'fulfilled' && mbRes.value?.recordings?.[0]?.isrcs?.length) {
+        isrc = mbRes.value.recordings[0].isrcs[0];
+      }
     }
 
     return {
-      isrc: isrc || '—',
-      albumName: title,
+      isrc,
+      albumName,
       albumArt
     };
   } catch (e) {
@@ -210,10 +214,10 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── Free Backup Engine: Run for any tracks unresolved due to 429 quota limits ──
+    // ── Parallel Fallback Engine: Process ALL unhandled tracks without 25-item slice limit ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[Free Fallback] Resolving ${unhandledTrackIds.length} tracks via free public embed engine...`);
-      const fallbackPromises = unhandledTrackIds.slice(0, 25).map(async id => {
+      console.log(`[Parallel Fallback] Resolving ALL ${unhandledTrackIds.length} tracks in parallel...`);
+      const fallbackPromises = unhandledTrackIds.map(async id => {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
           isrcMap[id] = info;
