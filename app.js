@@ -9,36 +9,18 @@ let activeMode = 'premium'; // 'premium' or 'web'
 const resultsPreviewAudio = new Audio();
 let activeResultsPreviewButton = null;
 
-// Cached anonymous Spotify token (from embed page) — valid for ~1 hour
-// Avoids re-fetching the embed page for every track that credits.fm misses
-const _spotifyAnonTokenCache = { token: null, expiresAt: 0 };
-
-async function getSpotifyAnonToken(trackId) {
-  // Return cached token if still valid (with 60s buffer)
-  if (_spotifyAnonTokenCache.token && Date.now() < _spotifyAnonTokenCache.expiresAt - 60000) {
-    return _spotifyAnonTokenCache.token;
+// ── Extension bridge: detect if our Chrome extension is installed ──────────────
+// page-connector.js fires PONG at 0ms/500ms/1500ms/3000ms after page load.
+// We listen globally from the very start so the flag is set long before
+// resolveWebFetchTrackDetails() runs.
+window.__extAvailable = false;
+window.addEventListener('message', (e) => {
+  if (e.data?.type === 'PONG_PLAYLIST_EXPORTER_EXT') {
+    window.__extAvailable = true;
   }
-  try {
-    const resp = await fetch(`https://open.spotify.com/embed/track/${trackId}`);
-    if (!resp.ok) return null;
-    const html = await resp.text();
-    const startTag = '<script id="__NEXT_DATA__" type="application/json">';
-    const s = html.indexOf(startTag);
-    if (s === -1) return null;
-    const jsonStart = s + startTag.length;
-    const jsonEnd = html.indexOf('</script>', jsonStart);
-    const data = JSON.parse(html.substring(jsonStart, jsonEnd));
-    const session = data?.props?.pageProps?.state?.settings?.session;
-    if (session?.accessToken) {
-      _spotifyAnonTokenCache.token = session.accessToken;
-      _spotifyAnonTokenCache.expiresAt = session.accessTokenExpirationTimestampMs || (Date.now() + 3600000);
-    }
-    return _spotifyAnonTokenCache.token || null;
-  } catch (e) {
-    console.warn('[Spotify Anon Token] Failed to get token:', e.message);
-    return null;
-  }
-}
+});
+// Also PING immediately so we catch the PONG even if script loads slightly late
+window.postMessage({ type: 'PING_PLAYLIST_EXPORTER_EXT' }, '*');
 
 // Heuristic Language Detector
 function detectLanguage(title, isrc) {
@@ -983,17 +965,12 @@ async function resolveWebFetchTrackDetails() {
   setLoading(true, `Fetching ISRCs (0 / ${pending.length})...`);
 
   // ── Step 0: Extension batch ISRC pre-fetch ──────────────────────────────────
-  // If the user has our extension installed AND has an open Spotify tab,
-  // we can get ALL ISRCs in 1-2 API calls using the web player's own auth token.
-  // This is the fastest, most reliable path — no 3rd party services needed.
-  const extInstalled = await new Promise(resolve => {
-    const timer = setTimeout(() => resolve(false), 500);
-    const handler = e => { if (e.data?.type === 'PONG_PLAYLIST_EXPORTER_EXT') { clearTimeout(timer); window.removeEventListener('message', handler); resolve(true); } };
-    window.addEventListener('message', handler);
-    window.postMessage({ type: 'PING_PLAYLIST_EXPORTER_EXT' }, '*');
-  });
+  // window.__extAvailable is set at page load by the global PONG listener above.
+  // The content script fires PONG at 0ms/500ms/1500ms/3000ms after page load,
+  // so by the time this runs (after backend calls complete), the flag is set.
+  console.log('[Ext] Extension available:', window.__extAvailable);
 
-  if (extInstalled) {
+  if (window.__extAvailable) {
     try {
       const trackIds = pending.map(({ track }) => track.url?.split('/track/').pop()?.split('?')[0]).filter(Boolean);
       const requestId = 'isrc_batch_' + Date.now();
