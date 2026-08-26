@@ -1360,6 +1360,11 @@ async function scrapeIsrcFinderTab(trackUrl) {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
+        const strongs = Array.from(document.querySelectorAll('strong'));
+        for (const s of strongs) {
+          const txt = (s.innerText || s.textContent || '').trim();
+          if (/^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(txt)) return txt;
+        }
         const text = document.body ? document.body.innerText : '';
         const isrcRegex = /[A-Z]{2}[A-Z0-9]{3}\d{7}/g;
         const matches = text.match(isrcRegex) || [];
