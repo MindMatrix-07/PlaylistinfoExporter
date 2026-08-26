@@ -1363,6 +1363,59 @@ function renderResults() {
     });
   });
 
+  // Add edit listeners for ISRC badges
+  body.querySelectorAll('.isrc-badge').forEach((badge, idx) => {
+    const track = allTracks[idx];
+
+    const triggerIsrcEdit = () => {
+      const current = track.isrc === '—' ? '' : track.isrc;
+      const input = document.createElement('input');
+      input.className = 'added-by-edit-input';
+      input.type = 'text';
+      input.placeholder = 'Enter ISRC...';
+      input.value = current;
+      badge.replaceWith(input);
+      input.focus();
+      input.select();
+
+      let closed = false;
+      const save = () => {
+        if (closed) return;
+        closed = true;
+        const next = input.value.trim().toUpperCase() || '—';
+        track.isrc = next;
+        renderResults();
+        showToast('ISRC updated.');
+      };
+      const cancel = () => {
+        if (closed) return;
+        closed = true;
+        input.replaceWith(badge);
+      };
+
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') save();
+        if (event.key === 'Escape') cancel();
+      });
+      input.addEventListener('blur', save, { once: true });
+    };
+
+    badge.title = 'Double-click or double-tap to edit ISRC';
+    badge.style.cursor = 'pointer';
+    badge.addEventListener('dblclick', triggerIsrcEdit);
+
+    let lastTap = 0;
+    badge.addEventListener('touchend', event => {
+      const currentTime = new Date().getTime();
+      const tapLength = currentTime - lastTap;
+      if (tapLength < 500 && tapLength > 0) {
+        event.preventDefault();
+        triggerIsrcEdit();
+      }
+      lastTap = currentTime;
+    });
+  });
+
   initResultsPreviewControls();
 
   const table = document.querySelector('.tracks-table');
