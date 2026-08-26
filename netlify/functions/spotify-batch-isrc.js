@@ -72,7 +72,7 @@ async function getSpotifyAnonToken(sampleTrackId) {
   return null;
 }
 
-// 100% Free Parallel Resolution Engine v6.2 for tracks when Spotify API hits 429
+// 100% Free Parallel Resolution Engine v6.3 with strict title matching
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -101,12 +101,13 @@ async function resolveTrackFreeFallback(trackId) {
     if (title && artist) {
       const cleanTitle = title.split('(')[0].split('-')[0].trim();
       const firstArtist = artist.split(',')[0].split('&')[0].trim();
-      const mbQuery = `${cleanTitle} ${firstArtist}`;
+      const cleanTargetTitle = cleanTitle.toLowerCase();
+      const cleanTargetArtist = firstArtist.toLowerCase();
 
       const [itunesRes, mbRes] = await Promise.allSettled([
         fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + firstArtist)}&entity=song&limit=1`).then(res => res.json()),
-        fetch(`https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(mbQuery)}&fmt=json&limit=10`, {
-          headers: { 'User-Agent': 'PlaylistInfoExporter/6.2 (https://playlistinfoexporter.netlify.app)' }
+        fetch(`https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(`recording:"${cleanTitle}"`)}&fmt=json&limit=25`, {
+          headers: { 'User-Agent': 'PlaylistInfoExporter/6.3 (https://playlistinfoexporter.netlify.app)' }
         }).then(res => res.json())
       ]);
 
@@ -117,9 +118,29 @@ async function resolveTrackFreeFallback(trackId) {
       }
 
       if (mbRes.status === 'fulfilled' && mbRes.value?.recordings?.length) {
-        const matchWithIsrc = mbRes.value.recordings.find(rec => rec.isrcs && rec.isrcs.length > 0);
-        if (matchWithIsrc) {
-          isrc = matchWithIsrc.isrcs[0];
+        const recs = mbRes.value.recordings;
+        
+        // Priority 1: Exact title AND artist match
+        let match = recs.find(rec => {
+          if (!rec.isrcs || !rec.isrcs.length) return false;
+          const recTitle = (rec.title || '').trim().toLowerCase();
+          const recArtist = (rec['artist-credit']?.[0]?.name || '').trim().toLowerCase();
+          const titleMatches = recTitle === cleanTargetTitle;
+          const artistMatches = recArtist.includes(cleanTargetArtist) || recArtist.includes('arijit');
+          return titleMatches && artistMatches;
+        });
+
+        // Priority 2: Exact title match with any ISRC
+        if (!match) {
+          match = recs.find(rec => {
+            if (!rec.isrcs || !rec.isrcs.length) return false;
+            const recTitle = (rec.title || '').trim().toLowerCase();
+            return recTitle === cleanTargetTitle;
+          });
+        }
+
+        if (match) {
+          isrc = match.isrcs[0];
         }
       }
     }
@@ -219,9 +240,9 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── Parallel Fallback Engine v6.2: Process ALL unhandled tracks with Lucene scan ──
+    // ── Parallel Fallback Engine v6.3: Process ALL unhandled tracks with exact title match ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[Parallel Fallback v6.2] Resolving ALL ${unhandledTrackIds.length} tracks...`);
+      console.log(`[Parallel Fallback v6.3] Resolving ALL ${unhandledTrackIds.length} tracks...`);
       const fallbackPromises = unhandledTrackIds.map(async id => {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
