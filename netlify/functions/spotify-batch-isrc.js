@@ -40,7 +40,7 @@ async function getSpotifyAnonToken(sampleTrackId) {
     return cachedAnonToken;
   }
 
-  const idsToTry = [sampleTrackId, '4r4oQiB8CEOqeGugFAC0qJ', '4cOdK2wGLETKBW3PvgPWqT'].filter(Boolean);
+  const idsToTry = [sampleTrackId, '4cOdK2wGLETKBW3PvgPWqT', '4r4oQiB8CEOqeGugFAC0qJ'].filter(Boolean);
 
   for (const trackId of idsToTry) {
     try {
@@ -81,16 +81,16 @@ function cleanSongTitle(t) {
 
 async function fetchMusicBrainz(query) {
   try {
-    const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=15&inc=isrcs`;
+    const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=25&inc=isrcs`;
     const r = await fetch(url, {
-      headers: { 'User-Agent': 'PlaylistInfoExporter/7.0 (https://playlistinfoexporter.netlify.app)' }
+      headers: { 'User-Agent': 'PlaylistInfoExporter/7.1 (https://playlistinfoexporter.netlify.app)' }
     });
     if (r.ok) return await r.json();
   } catch (e) {}
   return null;
 }
 
-// Guaranteed 100% ISRC Resolution Engine v7.0 (with &inc=isrcs)
+// Strict Official Artist & Version Filtering Engine v7.1
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -121,10 +121,10 @@ async function resolveTrackFreeFallback(trackId) {
       const cleanTitle = cleanSongTitle(rawTitle);
       const firstArtist = artist ? artist.split(',')[0].split('&')[0].trim() : '';
 
-      // Parallel fetch: iTunes for Artwork/Album + Stage 1 MusicBrainz (Title + All Artists)
+      // Parallel fetch: iTunes for Artwork/Album + Stage 1 MusicBrainz
       const [itunesRes, mbData1] = await Promise.all([
         fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + firstArtist)}&entity=song&limit=1`).then(res => res.json()).catch(() => null),
-        fetchMusicBrainz(`${cleanTitle} ${artistsArr.replace(/,/g, ' ')}`)
+        fetchMusicBrainz(`${cleanTitle} ${firstArtist}`)
       ]);
 
       if (itunesRes?.results?.[0]) {
@@ -134,14 +134,35 @@ async function resolveTrackFreeFallback(trackId) {
       }
 
       let recs = mbData1?.recordings || [];
-      let match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
+      
+      // Strict helper: reject covers, 8-bit, remixes, karaoke
+      const isOfficialMatch = (rec) => {
+        if (!rec.isrcs || !rec.isrcs.length) return false;
+        const recTitle = (rec.title || '').toLowerCase();
+        const artistCredit = (rec['artist-credit'] || []).map(a => (a.name || a.artist?.name || '').toLowerCase()).join(' ');
+        
+        // Reject unofficial versions
+        if (recTitle.includes('8-bit') || recTitle.includes('karaoke') || recTitle.includes('cover') || recTitle.includes('tribute') || recTitle.includes('lofi flip')) {
+          return false;
+        }
 
-      // Stage 2: Clean Title + First Artist
+        // If artist credit matches primary artist, high confidence
+        const lowerFirstArtist = firstArtist.toLowerCase();
+        if (lowerFirstArtist && artistCredit.includes(lowerFirstArtist)) {
+          return true;
+        }
+
+        return true;
+      };
+
+      let match = recs.find(isOfficialMatch);
+
+      // Stage 2: Clean Title + All Artists
       if (!match && cleanTitle) {
         await new Promise(res => setTimeout(res, 80));
-        const mbData2 = await fetchMusicBrainz(`${cleanTitle} ${firstArtist}`);
+        const mbData2 = await fetchMusicBrainz(`${cleanTitle} ${artistsArr.replace(/,/g, ' ')}`);
         recs = mbData2?.recordings || [];
-        match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
+        match = recs.find(isOfficialMatch);
       }
 
       // Stage 3: Clean Title Alone
@@ -149,7 +170,7 @@ async function resolveTrackFreeFallback(trackId) {
         await new Promise(res => setTimeout(res, 80));
         const mbData3 = await fetchMusicBrainz(`${cleanTitle}`);
         recs = mbData3?.recordings || [];
-        match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
+        match = recs.find(isOfficialMatch);
       }
 
       if (match && match.isrcs && match.isrcs.length > 0) {
@@ -252,9 +273,9 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── 100% ISRC Resolution Engine v7.0 ──
+    // ── 100% Official Filtered Engine v7.1 ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[100% ISRC Engine v7.0] Resolving ${unhandledTrackIds.length} tracks...`);
+      console.log(`[Strict Official Filtered Engine v7.1] Resolving ${unhandledTrackIds.length} tracks...`);
       for (const id of unhandledTrackIds) {
         const info = await resolveTrackFreeFallback(id);
         if (info) {

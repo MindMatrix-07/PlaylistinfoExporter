@@ -1002,10 +1002,29 @@ async function resolveWebFetchTrackDetails() {
     try {
       let isrcMap = null;
 
-      // 0a: Try direct browser-to-Spotify call (uses user OAuth token if logged in)
-      const userToken = localStorage.getItem('sp_access_token');
+      // 0a: Try direct browser-to-Spotify call (uses user OAuth token or anonymous browser embed token)
+      let userToken = localStorage.getItem('sp_access_token');
+      if (!userToken) {
+        try {
+          const sampleId = trackIds[0];
+          const embedRes = await fetch(`https://open.spotify.com/embed/track/${sampleId}`);
+          if (embedRes.ok) {
+            const html = await embedRes.text();
+            const s = html.indexOf('<script id="__NEXT_DATA__" type="application/json">');
+            if (s !== -1) {
+              const start = s + '<script id="__NEXT_DATA__" type="application/json">'.length;
+              const end = html.indexOf('</script>', start);
+              const json = JSON.parse(html.substring(start, end));
+              userToken = json?.props?.pageProps?.state?.settings?.session?.accessToken || null;
+            }
+          }
+        } catch (err) {
+          console.warn('[Batch ISRC] Direct browser embed token error:', err.message);
+        }
+      }
+
       if (userToken) {
-        console.log('[Batch ISRC] Attempting direct browser fetch to api.spotify.com with OAuth token...');
+        console.log('[Batch ISRC] Attempting direct browser fetch to api.spotify.com with client token...');
         isrcMap = {};
         const BATCH_SIZE = 50;
         for (let i = 0; i < trackIds.length; i += BATCH_SIZE) {
