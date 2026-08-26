@@ -1109,6 +1109,66 @@ async function resolveWebFetchTrackDetails() {
         }
       }
 
+      // ── Step 0b2: Concentrated Multi-Pass Retry Engine for '—' Outputs (v8.0) ──
+      let unrecoveredPending = pending.filter(item => !item.track.isrc || item.track.isrc === '—');
+      let retryPass = 1;
+      const MAX_RETRY_PASSES = 2;
+
+      while (unrecoveredPending.length > 0 && retryPass <= MAX_RETRY_PASSES) {
+        console.log(`[Batch ISRC Retry Pass ${retryPass + 1}] Reorganizing ${unrecoveredPending.length} unrecovered tracks for retry...`);
+        showToast(`Pass ${retryPass + 1}: Re-fetching ${unrecoveredPending.length} missing track ISRCs...`, 3000);
+        setLoading(true, `Retry Pass ${retryPass + 1} (${unrecoveredPending.length} tracks remaining)...`);
+
+        const retryTrackIds = unrecoveredPending
+          .map(item => extractSpotifyTrackId(item.track.url || item.track.uri || item.track.link || ''))
+          .filter(Boolean);
+
+        if (retryTrackIds.length === 0) break;
+
+        const CHUNK_SIZE = 4;
+        let recoveredInPass = 0;
+
+        for (let i = 0; i < retryTrackIds.length; i += CHUNK_SIZE) {
+          const chunk = retryTrackIds.slice(i, i + CHUNK_SIZE);
+          try {
+            const resp = await fetch('/api/spotify-batch-isrc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                trackIds: chunk,
+                accessToken: userToken || '',
+                forceRefresh: true
+              })
+            });
+            if (resp.ok) {
+              const data = await resp.json();
+              if (data.ok && data.isrcMap) {
+                Object.keys(data.isrcMap).forEach(id => {
+                  const item = trackIdToPending[id];
+                  const info = data.isrcMap[id];
+                  if (item && info && info.isrc && info.isrc !== '—') {
+                    item.track.isrc = info.isrc;
+                    if (info.albumName) item.track.album = info.albumName;
+                    if (info.albumArt) item.track.albumArt = info.albumArt;
+                    updateRenderedTrackDetails(item.track, item.index);
+                    recoveredInPass++;
+                  }
+                });
+              }
+            }
+          } catch (err) {
+            console.warn(`[Retry Pass ${retryPass + 1}] Chunk failed:`, err.message);
+          }
+          await new Promise(r => setTimeout(r, 250));
+        }
+
+        console.log(`[Retry Pass ${retryPass + 1}] Recovered ${recoveredInPass} additional ISRCs!`);
+        unrecoveredPending = pending.filter(item => !item.track.isrc || item.track.isrc === '—');
+        
+        if (recoveredInPass === 0) break;
+        retryPass++;
+      }
+
       // 0c: Extension-Assisted ISRCFinder Sequential Worker (v7.6)
       if (window.__extAvailable) {
         const stillPending = pending.filter(item => !item.track.isrc || item.track.isrc === '—');
