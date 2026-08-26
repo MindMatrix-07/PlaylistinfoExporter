@@ -1108,6 +1108,43 @@ async function resolveWebFetchTrackDetails() {
           showToast(`Resolved ${batchCount}/${trackIds.length} track details!`, 2500);
         }
       }
+
+      // 0c: Extension-Assisted ISRCFinder Sequential Worker (v7.6)
+      if (window.__extAvailable) {
+        const stillPending = pending.filter(item => !item.track.isrc || item.track.isrc === '—');
+        if (stillPending.length > 0) {
+          console.log(`[Ext ISRCFinder] Resolving remaining ${stillPending.length} tracks via Extension ISRCFinder Worker...`);
+          
+          for (let k = 0; k < stillPending.length; k++) {
+            const item = stillPending[k];
+            setLoading(true, `Extension ISRCFinder (${k + 1} / ${stillPending.length}): ${item.track.name}...`);
+            
+            const reqId = 'isrcfinder_' + Date.now() + '_' + k;
+            const extIsrc = await new Promise((resolve) => {
+              const timer = setTimeout(() => resolve('—'), 15000);
+              function onResponse(evt) {
+                if (evt.data?.type === 'FROM_EXT_SCRAPE_ISRC_FINDER_RESPONSE' && evt.data?.requestId === reqId) {
+                  clearTimeout(timer);
+                  window.removeEventListener('message', onResponse);
+                  resolve(evt.data?.isrc || '—');
+                }
+              }
+              window.addEventListener('message', onResponse);
+              window.postMessage({
+                type: 'FROM_PAGE_SCRAPE_ISRC_FINDER',
+                trackUrl: item.track.url || item.track.link || item.track.uri,
+                requestId: reqId
+              }, '*');
+            });
+
+            if (extIsrc && extIsrc !== '—') {
+              item.track.isrc = extIsrc;
+              updateRenderedTrackDetails(item.track, item.index);
+              showToast(`ISRCFinder: ${item.track.name} -> ${extIsrc}`, 2000);
+            }
+          }
+        }
+      }
     } catch (e) {
       console.warn('[Batch ISRC] Resolution error:', e.message);
     }
