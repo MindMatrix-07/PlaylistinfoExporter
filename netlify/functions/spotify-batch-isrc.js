@@ -72,7 +72,25 @@ async function getSpotifyAnonToken(sampleTrackId) {
   return null;
 }
 
-// 100% Free Parallel Resolution Engine v6.3 with strict title matching
+function cleanSongTitle(t) {
+  if (!t) return '';
+  let s = t.split('(')[0].split('-')[0].trim();
+  s = s.replace(/["'”]/g, '').trim();
+  return s;
+}
+
+async function fetchMusicBrainz(query) {
+  try {
+    const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=25`;
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'PlaylistInfoExporter/6.4 (https://playlistinfoexporter.netlify.app)' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {}
+  return null;
+}
+
+// 100% Free 2-Pass Parallel Resolution Engine v6.4
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -92,56 +110,49 @@ async function resolveTrackFreeFallback(trackId) {
     const entity = data?.props?.pageProps?.state?.data?.entity;
     if (!entity) return null;
 
-    const title = entity.title || entity.name || '';
+    const rawTitle = entity.title || entity.name || '';
     const artist = entity.artists?.[0]?.name || '';
     let albumArt = entity.visualIdentity?.image?.[0]?.url || '';
-    let albumName = title;
+    let albumName = rawTitle;
     let isrc = '—';
 
-    if (title && artist) {
-      const cleanTitle = title.split('(')[0].split('-')[0].trim();
-      const firstArtist = artist.split(',')[0].split('&')[0].trim();
+    if (rawTitle) {
+      const cleanTitle = cleanSongTitle(rawTitle);
+      const firstArtist = artist ? artist.split(',')[0].split('&')[0].trim() : '';
       const cleanTargetTitle = cleanTitle.toLowerCase();
-      const cleanTargetArtist = firstArtist.toLowerCase();
 
-      const [itunesRes, mbRes] = await Promise.allSettled([
-        fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + firstArtist)}&entity=song&limit=1`).then(res => res.json()),
-        fetch(`https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(`recording:"${cleanTitle}"`)}&fmt=json&limit=25`, {
-          headers: { 'User-Agent': 'PlaylistInfoExporter/6.3 (https://playlistinfoexporter.netlify.app)' }
-        }).then(res => res.json())
+      // Parallel fetch: iTunes for Artwork/Album + Pass 1 MusicBrainz
+      const [itunesRes, mbData1] = await Promise.all([
+        fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + firstArtist)}&entity=song&limit=1`).then(res => res.json()).catch(() => null),
+        fetchMusicBrainz(`recording:"${cleanTitle}"`)
       ]);
 
-      if (itunesRes.status === 'fulfilled' && itunesRes.value?.results?.[0]) {
-        const match = itunesRes.value.results[0];
+      if (itunesRes?.results?.[0]) {
+        const match = itunesRes.results[0];
         if (match.collectionName) albumName = match.collectionName;
         if (match.artworkUrl100) albumArt = match.artworkUrl100.replace('100x100bb', '600x600bb');
       }
 
-      if (mbRes.status === 'fulfilled' && mbRes.value?.recordings?.length) {
-        const recs = mbRes.value.recordings;
-        
-        // Priority 1: Exact title AND artist match
-        let match = recs.find(rec => {
+      let recs = mbData1?.recordings || [];
+      let match = recs.find(rec => {
+        if (!rec.isrcs || !rec.isrcs.length) return false;
+        const recTitle = (rec.title || '').trim().toLowerCase().replace(/["'”]/g, '');
+        return recTitle === cleanTargetTitle || recTitle.includes(cleanTargetTitle) || cleanTargetTitle.includes(recTitle);
+      });
+
+      // Pass 2: Unquoted title search if Pass 1 gave no ISRC
+      if (!match && cleanTitle) {
+        const mbData2 = await fetchMusicBrainz(`${cleanTitle} ${firstArtist}`);
+        recs = mbData2?.recordings || [];
+        match = recs.find(rec => {
           if (!rec.isrcs || !rec.isrcs.length) return false;
-          const recTitle = (rec.title || '').trim().toLowerCase();
-          const recArtist = (rec['artist-credit']?.[0]?.name || '').trim().toLowerCase();
-          const titleMatches = recTitle === cleanTargetTitle;
-          const artistMatches = recArtist.includes(cleanTargetArtist) || recArtist.includes('arijit');
-          return titleMatches && artistMatches;
+          const recTitle = (rec.title || '').trim().toLowerCase().replace(/["'”]/g, '');
+          return recTitle === cleanTargetTitle || recTitle.includes(cleanTargetTitle) || cleanTargetTitle.includes(recTitle);
         });
+      }
 
-        // Priority 2: Exact title match with any ISRC
-        if (!match) {
-          match = recs.find(rec => {
-            if (!rec.isrcs || !rec.isrcs.length) return false;
-            const recTitle = (rec.title || '').trim().toLowerCase();
-            return recTitle === cleanTargetTitle;
-          });
-        }
-
-        if (match) {
-          isrc = match.isrcs[0];
-        }
+      if (match) {
+        isrc = match.isrcs[0];
       }
     }
 
@@ -240,9 +251,9 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── Parallel Fallback Engine v6.3: Process ALL unhandled tracks with exact title match ──
+    // ── 2-Pass Parallel Fallback Engine v6.4: Process ALL unhandled tracks ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[Parallel Fallback v6.3] Resolving ALL ${unhandledTrackIds.length} tracks...`);
+      console.log(`[2-Pass Parallel Fallback v6.4] Resolving ALL ${unhandledTrackIds.length} tracks...`);
       const fallbackPromises = unhandledTrackIds.map(async id => {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
