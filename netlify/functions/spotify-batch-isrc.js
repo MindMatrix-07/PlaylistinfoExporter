@@ -251,16 +251,17 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── 2-Pass Parallel Fallback Engine v6.4: Process ALL unhandled tracks ──
+    // ── 2-Pass Staggered Fallback Engine v6.7: Process ALL chunk tracks ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[2-Pass Parallel Fallback v6.4] Resolving ALL ${unhandledTrackIds.length} tracks...`);
-      const fallbackPromises = unhandledTrackIds.map(async id => {
+      console.log(`[2-Pass Staggered Fallback v6.7] Resolving ${unhandledTrackIds.length} tracks...`);
+      for (const id of unhandledTrackIds) {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
           isrcMap[id] = info;
         }
-      });
-      await Promise.all(fallbackPromises);
+        // Small delay to keep MusicBrainz rate limits clear
+        await new Promise(r => setTimeout(r, 150));
+      }
     }
 
     return {

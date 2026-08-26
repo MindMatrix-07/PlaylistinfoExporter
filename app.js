@@ -1033,21 +1033,33 @@ async function resolveWebFetchTrackDetails() {
         }
       }
 
-      // 0b: Serverless 2-Pass Parallel Batch Resolution Fallback (v6.5)
+      // 0b: Serverless 2-Pass Parallel Batch Resolution Fallback (v6.7 - 4-track chunking)
       if (!isrcMap || Object.keys(isrcMap).length === 0) {
-        console.log('[Batch ISRC] Sending track IDs to Netlify 2-Pass Parallel Batch Engine...');
-        const resp = await fetch('/api/spotify-batch-isrc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            trackIds,
-            accessToken: userToken || ''
-          })
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.ok && data.isrcMap) {
-            isrcMap = data.isrcMap;
+        console.log('[Batch ISRC] Sending track IDs in 4-item chunks to prevent Netlify timeouts...');
+        isrcMap = {};
+        const CHUNK_SIZE = 4;
+        for (let i = 0; i < trackIds.length; i += CHUNK_SIZE) {
+          const chunk = trackIds.slice(i, i + CHUNK_SIZE);
+          const currentCount = Math.min(i + CHUNK_SIZE, trackIds.length);
+          setLoading(true, `Resolving track details (${currentCount} / ${trackIds.length})...`);
+          
+          try {
+            const resp = await fetch('/api/spotify-batch-isrc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                trackIds: chunk,
+                accessToken: userToken || ''
+              })
+            });
+            if (resp.ok) {
+              const data = await resp.json();
+              if (data.ok && data.isrcMap) {
+                Object.assign(isrcMap, data.isrcMap);
+              }
+            }
+          } catch (err) {
+            console.warn(`[Batch ISRC] Chunk ${i} failed:`, err.message);
           }
         }
       }
