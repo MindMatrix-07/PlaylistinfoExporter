@@ -1,11 +1,42 @@
 const fetch = require('isomorphic-unfetch');
 
-// Cache anonymous bearer token in warm Lambda instances (15 min TTL)
+const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
+
+let cachedClientToken = null;
+let clientTokenExpiresAt = 0;
 let cachedAnonToken = null;
-let tokenExpiresAt = 0;
+let anonTokenExpiresAt = 0;
+
+async function getSpotifyClientToken() {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) return null;
+  if (cachedClientToken && Date.now() < clientTokenExpiresAt - 60000) {
+    return cachedClientToken;
+  }
+  try {
+    const auth = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
+    const r = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: 'grant_type=client_credentials'
+    });
+    if (r.ok) {
+      const d = await r.json();
+      cachedClientToken = d.access_token;
+      clientTokenExpiresAt = Date.now() + (d.expires_in || 3600) * 1000;
+      return cachedClientToken;
+    }
+  } catch (e) {
+    console.error('[Batch ISRC] Client credentials token error:', e.message);
+  }
+  return null;
+}
 
 async function getSpotifyAnonToken(sampleTrackId) {
-  if (cachedAnonToken && Date.now() < tokenExpiresAt - 60000) {
+  if (cachedAnonToken && Date.now() < anonTokenExpiresAt - 60000) {
     return cachedAnonToken;
   }
 
@@ -30,11 +61,11 @@ async function getSpotifyAnonToken(sampleTrackId) {
       
       if (token) {
         cachedAnonToken = token;
-        tokenExpiresAt = Date.now() + 15 * 60 * 1000;
+        anonTokenExpiresAt = Date.now() + 15 * 60 * 1000;
         return token;
       }
     } catch (e) {
-      console.warn(`[Batch ISRC] Token fetch failed for ${trackId}:`, e.message);
+      console.warn(`[Batch ISRC] Anon token fetch failed for ${trackId}:`, e.message);
     }
   }
 
@@ -73,7 +104,9 @@ exports.handler = async (event, context) => {
       };
     }
 
-    let token = await getSpotifyAnonToken(trackIds[0]);
+    // Prioritize: 1) Client-provided user token, 2) Official Client Credentials token, 3) Scraped Embed token
+    let token = body.accessToken || await getSpotifyClientToken() || await getSpotifyAnonToken(trackIds[0]);
+
     if (!token) {
       return {
         statusCode: 200,
@@ -93,12 +126,11 @@ exports.handler = async (event, context) => {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
-        // If token expired (401), force refresh token once and retry batch
-        if (r.status === 401) {
-          console.warn('[Batch ISRC] Token 401 Unauthorized, refreshing token...');
+        // If 401 or 429, attempt to fallback to Client Credentials or Anon token refresh
+        if (r.status === 401 || r.status === 429) {
+          console.warn(`[Batch ISRC] Spotify API returned ${r.status}, attempting fallback token...`);
           cachedAnonToken = null;
-          tokenExpiresAt = 0;
-          token = await getSpotifyAnonToken(trackIds[0]);
+          token = await getSpotifyClientToken() || await getSpotifyAnonToken(trackIds[0]);
           if (token) {
             r = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
               headers: { 'Authorization': `Bearer ${token}` }

@@ -978,7 +978,10 @@ async function resolveWebFetchTrackDetails() {
       const resp = await fetch('/api/spotify-batch-isrc', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackIds })
+        body: JSON.stringify({ 
+          trackIds,
+          accessToken: localStorage.getItem('sp_access_token') || ''
+        })
       });
       if (resp.ok) {
         const data = await resp.json();
