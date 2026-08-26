@@ -83,14 +83,14 @@ async function fetchMusicBrainz(query) {
   try {
     const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=25&inc=isrcs`;
     const r = await fetch(url, {
-      headers: { 'User-Agent': 'PlaylistInfoExporter/7.1 (https://playlistinfoexporter.netlify.app)' }
+      headers: { 'User-Agent': 'PlaylistInfoExporter/7.3 (https://playlistinfoexporter.netlify.app)' }
     });
     if (r.ok) return await r.json();
   } catch (e) {}
   return null;
 }
 
-// Strict Official Artist & Version Filtering Engine v7.1
+// Strict Title + Artist Validation Engine v7.3 (Zero Incorrect Covers)
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -135,41 +135,33 @@ async function resolveTrackFreeFallback(trackId) {
 
       let recs = mbData1?.recordings || [];
       
-      // Strict helper: reject covers, 8-bit, remixes, karaoke
+      // Strict validator: title AND artist MUST match, reject covers/remixes/8-bit
       const isOfficialMatch = (rec) => {
         if (!rec.isrcs || !rec.isrcs.length) return false;
         const recTitle = (rec.title || '').toLowerCase();
         const artistCredit = (rec['artist-credit'] || []).map(a => (a.name || a.artist?.name || '').toLowerCase()).join(' ');
         
-        // Reject unofficial versions
-        if (recTitle.includes('8-bit') || recTitle.includes('karaoke') || recTitle.includes('cover') || recTitle.includes('tribute') || recTitle.includes('lofi flip')) {
+        // Reject unofficial versions unless cleanTitle explicitly asks for it
+        if (recTitle.includes('8-bit') || recTitle.includes('karaoke') || recTitle.includes('tribute') || recTitle.includes('cover')) {
           return false;
         }
 
-        // If artist credit matches primary artist, high confidence
+        const lowerCleanTitle = cleanTitle.toLowerCase();
         const lowerFirstArtist = firstArtist.toLowerCase();
-        if (lowerFirstArtist && artistCredit.includes(lowerFirstArtist)) {
-          return true;
-        }
 
-        return true;
+        const titleMatches = recTitle.includes(lowerCleanTitle) || lowerCleanTitle.includes(recTitle);
+        const artistMatches = artistCredit.includes(lowerFirstArtist) || recTitle.includes(lowerFirstArtist);
+
+        return titleMatches && artistMatches;
       };
 
       let match = recs.find(isOfficialMatch);
 
-      // Stage 2: Clean Title + All Artists
-      if (!match && cleanTitle) {
+      // Stage 2: Try Title + All Artists
+      if (!match && cleanTitle && artistsArr) {
         await new Promise(res => setTimeout(res, 80));
         const mbData2 = await fetchMusicBrainz(`${cleanTitle} ${artistsArr.replace(/,/g, ' ')}`);
         recs = mbData2?.recordings || [];
-        match = recs.find(isOfficialMatch);
-      }
-
-      // Stage 3: Clean Title Alone
-      if (!match && cleanTitle) {
-        await new Promise(res => setTimeout(res, 80));
-        const mbData3 = await fetchMusicBrainz(`${cleanTitle}`);
-        recs = mbData3?.recordings || [];
         match = recs.find(isOfficialMatch);
       }
 
@@ -273,9 +265,9 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── 100% Official Filtered Engine v7.1 ──
+    // ── Strict Title + Artist Validation Engine v7.3 ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[Strict Official Filtered Engine v7.1] Resolving ${unhandledTrackIds.length} tracks...`);
+      console.log(`[Strict Title + Artist Validation Engine v7.3] Resolving ${unhandledTrackIds.length} tracks...`);
       for (const id of unhandledTrackIds) {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
