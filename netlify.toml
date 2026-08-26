@@ -12,3 +12,8 @@
   from = "/api/spotify-track-details"
   to = "/.netlify/functions/spotify-track-details"
   status = 200
+
+[[redirects]]
+  from = "/api/spotify-batch-isrc"
+  to = "/.netlify/functions/spotify-batch-isrc"
+  status = 200
