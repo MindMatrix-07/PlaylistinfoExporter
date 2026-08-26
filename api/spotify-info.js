@@ -34,6 +34,13 @@ const SOUNDPLATE_HEADERS = {
 const CREDITS_FM_SEARCH = 'https://api.credits.fm/v1/search';
 const CREDITS_FM_HEADERS = { 'User-Agent': 'PlaylistInfoExporter/3.0' };
 
+// Spotify Official API (Client Credentials) — most reliable ISRC source.
+// Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in Netlify environment variables.
+// No user login required. Token auto-refreshes on expiry.
+const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
+const _spotifyClientTokenCache = { token: null, expiresAt: 0 };
+
 const EMPTY_DETAILS = {
   isrc: '—',
   albumName: 'Unknown Album'
@@ -238,6 +245,57 @@ function getBestImage(data) {
   return candidates.find(Boolean) || '';
 }
 
+// Gets a Spotify access token via Client Credentials flow (no user login).
+// Token is cached in memory for its lifetime (~1 hour).
+async function getSpotifyClientToken() {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) return null;
+  if (_spotifyClientTokenCache.token && Date.now() < _spotifyClientTokenCache.expiresAt - 30000) {
+    return _spotifyClientTokenCache.token;
+  }
+  try {
+    const creds = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
+    const res = await fetchWithTimeout('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'grant_type=client_credentials'
+    }, 5000);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.access_token) {
+      _spotifyClientTokenCache.token = data.access_token;
+      _spotifyClientTokenCache.expiresAt = Date.now() + (data.expires_in * 1000);
+    }
+    return _spotifyClientTokenCache.token || null;
+  } catch (e) {
+    console.warn('[Spotify CC] Token fetch failed:', e.message);
+    return null;
+  }
+}
+
+// Fetch full track metadata from the official Spotify API using client credentials.
+// Returns isrc, albumArt (640px), albumName, or null if unavailable.
+async function fetchSpotifyTrackISRC(trackId) {
+  const token = await getSpotifyClientToken();
+  if (!token || !trackId) return null;
+  try {
+    const res = await fetchWithTimeout(`https://api.spotify.com/v1/tracks/${trackId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    }, 5000);
+    if (!res.ok) return null;
+    const d = await res.json();
+    const isrc = d?.external_ids?.isrc;
+    if (!isrc) return null;
+    return {
+      isrc,
+      albumArt: d?.album?.images?.[0]?.url || '',
+      albumName: d?.album?.name || 'Unknown Album'
+    };
+  } catch (e) {
+    console.warn('[Spotify CC] Track fetch failed:', e.message);
+    return null;
+  }
+}
+
 async function fetchSoundplateDetails(track, playlistImage, options = {}) {
   const trackId = extractSpotifyTrackId(track);
   // Preserve the original URL (with ?si= if present) — Soundplate needs it
@@ -259,7 +317,24 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
   // but fall back to the clean trackUrl
   const lookupUrl = originalUrl.includes('open.spotify.com/track/') ? originalUrl : trackUrl;
 
-  // ── Step 1: credits.fm — primary source (discovered via HAR of isrc.fm) ──
+  // ── Step 1: Spotify Official API (Client Credentials) — most reliable source ──
+  // Requires SPOTIFY_CLIENT_ID + SPOTIFY_CLIENT_SECRET in Netlify env vars.
+  // No user login needed. Always returns ISRC for any valid Spotify track.
+  if (trackId && SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET) {
+    console.log(`[Spotify API] Looking up track ${trackId}`);
+    const spotifyResult = await fetchSpotifyTrackISRC(trackId);
+    if (spotifyResult?.isrc) {
+      return {
+        isrc: spotifyResult.isrc,
+        albumArt: spotifyResult.albumArt || playlistImage,
+        albumName: spotifyResult.albumName,
+        trackUrl: trackUrl || lookupUrl,
+        lookupStatus: 'spotify_api_ok'
+      };
+    }
+  }
+
+  // ── Step 2: credits.fm — public fallback (no credentials needed) ──
   // Accepts the full Spotify URL including ?si= parameter. No auth required.
   console.log(`[credits.fm] Looking up ISRC for ${trackId || lookupUrl}`);
   const creditsFmResult = await fetchCreditsFmISRC(lookupUrl);
