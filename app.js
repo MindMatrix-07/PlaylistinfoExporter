@@ -992,7 +992,9 @@ async function resolveWebFetchTrackDetails() {
               if (!item.track.album || item.track.album === 'Unknown Album' || item.track.album === '—') {
                 item.track.album = info.albumName || '';
               }
-              item.track.albumArt = item.track.albumArt || info.albumArt || '';
+              if (info.albumArt) {
+                item.track.albumArt = info.albumArt;
+              }
               updateRenderedTrackDetails(item.track, item.index);
               batchCount++;
             }
