@@ -81,16 +81,20 @@ function cleanSongTitle(t) {
 
 async function fetchMusicBrainz(query) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2200);
     const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=25&inc=isrcs`;
     const r = await fetch(url, {
-      headers: { 'User-Agent': 'PlaylistInfoExporter/7.3 (https://playlistinfoexporter.netlify.app)' }
+      signal: controller.signal,
+      headers: { 'User-Agent': 'PlaylistInfoExporter/7.4 (https://playlistinfoexporter.netlify.app)' }
     });
+    clearTimeout(timeout);
     if (r.ok) return await r.json();
   } catch (e) {}
   return null;
 }
 
-// Strict Title + Artist Validation Engine v7.3 (Zero Incorrect Covers)
+// Fast Strict Title + Artist Validation Engine v7.4 (Zero Incorrect Covers & 2.2s Fast Timeout)
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -157,9 +161,9 @@ async function resolveTrackFreeFallback(trackId) {
 
       let match = recs.find(isOfficialMatch);
 
-      // Stage 2: Try Title + All Artists
+      // Stage 2: Try Title + All Artists if Stage 1 missed
       if (!match && cleanTitle && artistsArr) {
-        await new Promise(res => setTimeout(res, 80));
+        await new Promise(res => setTimeout(res, 50));
         const mbData2 = await fetchMusicBrainz(`${cleanTitle} ${artistsArr.replace(/,/g, ' ')}`);
         recs = mbData2?.recordings || [];
         match = recs.find(isOfficialMatch);
@@ -265,15 +269,15 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── Strict Title + Artist Validation Engine v7.3 ──
+    // ── Fast Strict Title + Artist Validation Engine v7.4 ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[Strict Title + Artist Validation Engine v7.3] Resolving ${unhandledTrackIds.length} tracks...`);
+      console.log(`[Fast Strict Engine v7.4] Resolving ${unhandledTrackIds.length} tracks...`);
       for (const id of unhandledTrackIds) {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
           isrcMap[id] = info;
         }
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 50));
       }
     }
 
