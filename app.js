@@ -1008,6 +1008,34 @@ async function resolveWebFetchTrackDetails() {
     }
   }
 
+  // ── Step 0.5: Parallel Spotify oEmbed Album Art Fetch for Unique Artwork ─────
+  const playlistCoverUrl = playlistData?.images?.[0]?.url || '';
+  const tracksNeedingArt = allTracks
+    .map((track, index) => ({ track, index }))
+    .filter(({ track }) => track.url && (!track.albumArt || (playlistCoverUrl && track.albumArt === playlistCoverUrl)));
+
+  if (tracksNeedingArt.length > 0) {
+    console.log(`[oEmbed Art] Fetching unique album art for ${tracksNeedingArt.length} tracks in parallel...`);
+    const oembedPromises = tracksNeedingArt.map(async ({ track, index }) => {
+      const id = track.url?.split('/track/').pop()?.split('?')[0];
+      if (!id) return;
+      try {
+        const r = await fetch(`https://open.spotify.com/oembed?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2F${id}`);
+        if (r.ok) {
+          const d = await r.json();
+          if (d.thumbnail_url) {
+            track.albumArt = d.thumbnail_url;
+            updateRenderedTrackDetails(track, index);
+          }
+        }
+      } catch (err) {
+        console.warn(`[oEmbed Art] Failed to fetch art for ${track.name}:`, err.message);
+      }
+    });
+
+    await Promise.all(oembedPromises);
+  }
+
   // ── Step 1: Fallback loop for any remaining unresolved tracks ───────────────
   const stillPending = pending.filter(({ track }) => !track.isrc || track.isrc === '—');
   let completed = pending.length - stillPending.length;
