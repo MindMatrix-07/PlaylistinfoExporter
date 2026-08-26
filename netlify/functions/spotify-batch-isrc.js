@@ -1,6 +1,6 @@
 const fetch = require('isomorphic-unfetch');
 
-// Cache anonymous bearer token for 45 minutes to reduce embed page fetches
+// Cache anonymous bearer token in warm Lambda instances (15 min TTL)
 let cachedAnonToken = null;
 let tokenExpiresAt = 0;
 
@@ -9,33 +9,36 @@ async function getSpotifyAnonToken(sampleTrackId) {
     return cachedAnonToken;
   }
 
-  const trackId = sampleTrackId || '4r4oQiB8CEOqeGugFAC0qJ';
-  try {
-    const r = await fetch(`https://open.spotify.com/embed/track/${trackId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  const idsToTry = [sampleTrackId, '4r4oQiB8CEOqeGugFAC0qJ', '4cOdK2wGLETKBW3PvgPWqT'].filter(Boolean);
+
+  for (const trackId of idsToTry) {
+    try {
+      const r = await fetch(`https://open.spotify.com/embed/track/${trackId}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        }
+      });
+      if (!r.ok) continue;
+      const html = await r.text();
+      const startTag = '<script id="__NEXT_DATA__" type="application/json">';
+      const s = html.indexOf(startTag);
+      if (s === -1) continue;
+      const jsonStart = s + startTag.length;
+      const jsonEnd = html.indexOf('</script>', jsonStart);
+      const data = JSON.parse(html.substring(jsonStart, jsonEnd));
+      const token = data?.props?.pageProps?.state?.settings?.session?.accessToken || null;
+      
+      if (token) {
+        cachedAnonToken = token;
+        tokenExpiresAt = Date.now() + 15 * 60 * 1000;
+        return token;
       }
-    });
-    if (!r.ok) return null;
-    const html = await r.text();
-    const startTag = '<script id="__NEXT_DATA__" type="application/json">';
-    const s = html.indexOf(startTag);
-    if (s === -1) return null;
-    const jsonStart = s + startTag.length;
-    const jsonEnd = html.indexOf('</script>', jsonStart);
-    const data = JSON.parse(html.substring(jsonStart, jsonEnd));
-    const token = data?.props?.pageProps?.state?.settings?.session?.accessToken || null;
-    
-    if (token) {
-      cachedAnonToken = token;
-      // Tokens are typically valid for 1 hour
-      tokenExpiresAt = Date.now() + 45 * 60 * 1000;
+    } catch (e) {
+      console.warn(`[Batch ISRC] Token fetch failed for ${trackId}:`, e.message);
     }
-    return token;
-  } catch (e) {
-    console.error('[Batch ISRC] Failed to get Spotify token:', e.message);
-    return null;
   }
+
+  return null;
 }
 
 exports.handler = async (event, context) => {
@@ -70,7 +73,7 @@ exports.handler = async (event, context) => {
       };
     }
 
-    const token = await getSpotifyAnonToken(trackIds[0]);
+    let token = await getSpotifyAnonToken(trackIds[0]);
     if (!token) {
       return {
         statusCode: 200,
@@ -86,12 +89,25 @@ exports.handler = async (event, context) => {
       const batch = trackIds.slice(i, i + BATCH_SIZE);
       const ids = batch.join(',');
       try {
-        const r = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
+        let r = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
 
+        // If token expired (401), force refresh token once and retry batch
+        if (r.status === 401) {
+          console.warn('[Batch ISRC] Token 401 Unauthorized, refreshing token...');
+          cachedAnonToken = null;
+          tokenExpiresAt = 0;
+          token = await getSpotifyAnonToken(trackIds[0]);
+          if (token) {
+            r = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+          }
+        }
+
         if (!r.ok) {
-          console.warn(`[Batch ISRC] Spotify API returned ${r.status}`);
+          console.warn(`[Batch ISRC] Spotify API returned status ${r.status}`);
           continue;
         }
 
