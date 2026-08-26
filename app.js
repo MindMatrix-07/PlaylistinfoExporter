@@ -1088,41 +1088,6 @@ async function resolveOneWebFetchTrack(track, index) {
     }
   }
 
-  // Spotify embed-page anon-token fallback — for tracks not indexed in credits.fm.
-  // The Spotify embed page exposes an anonymous bearer token in its __NEXT_DATA__ script.
-  // Browsers can fetch this cross-origin (it's designed for embedding). We use it
-  // to call the official Spotify /v1/tracks API which always returns external_ids.isrc.
-  if (!track.isrc || track.isrc === '—') {
-    try {
-      const trackId = track.url ? track.url.split('/track/').pop().split('?')[0] : null;
-      if (trackId) {
-        const anonToken = await getSpotifyAnonToken(trackId);
-        if (anonToken) {
-          const trackResp = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
-            headers: { 'Authorization': `Bearer ${anonToken}` }
-          });
-          if (trackResp.ok) {
-            const trackData = await trackResp.json();
-            const isrc = trackData?.external_ids?.isrc;
-            if (isrc) {
-              track.isrc = isrc;
-              track.album = track.album || trackData?.album?.name || '';
-              track.albumArt = track.albumArt || trackData?.album?.images?.[0]?.url || '';
-              updateRenderedTrackDetails(track, index);
-              console.log('[Spotify Anon]', track.name, '->', isrc);
-            }
-          } else if (trackResp.status === 429) {
-            // Token quota exceeded — clear cached token so next call gets a fresh one
-            _spotifyAnonTokenCache.token = null;
-            _spotifyAnonTokenCache.expiresAt = 0;
-          }
-        }
-      }
-    } catch (spotifyErr) {
-      console.warn('[Web Fetch] Spotify embed anon-token fallback failed:', track.name, spotifyErr.message);
-    }
-  }
-
   // Client-side oEmbed album art fetch — always runs if albumArt is still missing.
   // Spotify oEmbed is free, public, no auth, and returns album art for every track.
   if (!track.albumArt) {
@@ -1143,6 +1108,7 @@ async function resolveOneWebFetchTrack(track, index) {
     }
   }
 }
+
 
 function updateRenderedTrackDetails(track, index) {
   const row = document.querySelectorAll('#tracksBody .track-row')[index];

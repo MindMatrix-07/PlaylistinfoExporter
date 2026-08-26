@@ -270,29 +270,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Batches up to 50 tracks per API call — full playlist resolved in 1-2 calls.
 
 async function getSpotifyWebPlayerToken() {
-  // Find any open Spotify tab
-  const tabs = await chrome.tabs.query({ url: 'https://open.spotify.com/*' });
-  if (!tabs.length) throw new Error('No open Spotify tab found');
+  // Find any open Spotify tab; if none, open one silently and close after getting token
+  let tabs = await chrome.tabs.query({ url: 'https://open.spotify.com/*' });
+  let openedTab = null;
+
+  if (!tabs.length) {
+    console.log('[ISRC Batch] No Spotify tab open — creating one silently...');
+    openedTab = await chrome.tabs.create({ url: 'https://open.spotify.com/', active: false });
+    // Wait for the tab to finish loading
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Spotify tab load timeout')), 15000);
+      chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+        if (tabId === openedTab.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+    tabs = [openedTab];
+  }
 
   // Inject a script to call get_access_token from the Spotify page context
-  // (works because the page has the sp_dc cookie)
-  const results = await chrome.scripting.executeScript({
-    target: { tabId: tabs[0].id },
-    func: async () => {
-      try {
-        const r = await fetch('/get_access_token?reason=transport&productType=web-player', {
-          credentials: 'include'
-        });
-        if (!r.ok) return null;
-        const d = await r.json();
-        return d.accessToken || null;
-      } catch (e) {
-        return null;
+  // (works because the page has the sp_dc session cookie)
+  let token = null;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      func: async () => {
+        try {
+          const r = await fetch('/get_access_token?reason=transport&productType=web-player', {
+            credentials: 'include'
+          });
+          if (!r.ok) return null;
+          const d = await r.json();
+          return d.accessToken || null;
+        } catch (e) {
+          return null;
+        }
       }
+    });
+    token = results?.[0]?.result || null;
+  } finally {
+    // Close the tab we opened (don't close user's existing tabs)
+    if (openedTab) {
+      chrome.tabs.remove(openedTab.id).catch(() => {});
     }
-  });
+  }
 
-  const token = results?.[0]?.result;
   if (!token) throw new Error('Could not get Spotify web player token');
   return token;
 }
