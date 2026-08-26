@@ -79,6 +79,18 @@ window.addEventListener("message", (event) => {
         }
       }
     );
+  if (event.data?.type === 'FROM_PAGE_SCRAPE_ISRC_FINDER') {
+    const { trackUrl, requestId } = event.data;
+    chrome.runtime.sendMessage(
+      { type: 'SCRAPE_ISRC_FINDER', trackUrl, requestId },
+      (res) => {
+        if (chrome.runtime.lastError) {
+          window.postMessage({ type: 'FROM_EXT_SCRAPE_ISRC_FINDER_RESPONSE', ok: false, error: chrome.runtime.lastError.message, isrc: '—', requestId }, '*');
+        } else {
+          window.postMessage({ type: 'FROM_EXT_SCRAPE_ISRC_FINDER_RESPONSE', ok: res?.ok ?? false, isrc: res?.isrc || '—', error: res?.error, requestId }, '*');
+        }
+      }
+    );
   }
 });
 

@@ -262,6 +262,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ ok: false, error: err.message, isrcMap: {} }));
     return true;
   }
+
+  if (message?.type === 'SCRAPE_ISRC_FINDER') {
+    scrapeIsrcFinderTab(message.trackUrl)
+      .then(isrc => sendResponse({ ok: true, isrc }))
+      .catch(err => sendResponse({ ok: false, error: err.message, isrc: '—' }));
+    return true;
+  }
 });
 
 // ─── Batch ISRC Fetch via Spotify Web Player Token ───────────────────────────
@@ -1314,9 +1321,59 @@ async function handleGoogleAiLang(song, artists, requestId) {
 
   if (!foundLang) {
     addAiDebug('bg', 'Timed out waiting for Google AI answer', { requestId });
-    throw new Error('Google AI took too long to answer.');
+    throw new Error('Google AI search timed out');
   }
 
-  addAiDebug('bg', 'Returning language result', { requestId, language: foundLang });
   return foundLang;
+}
+
+// ─── Scrape ISRC Finder Tab Worker ──────────────────────────────────────────
+async function scrapeIsrcFinderTab(trackUrl) {
+  if (!trackUrl) return '—';
+  let tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: 'https://www.isrcfinder.com/', active: true });
+    await waitForTabComplete(tab.id, 10000);
+    await new Promise(r => setTimeout(r, 1500));
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (urlToSearch) => {
+        const input = document.querySelector('input[name="URI"], input[type="text"]');
+        if (input) {
+          input.value = urlToSearch;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          const btn = document.querySelector('button[type="submit"], input[type="submit"]');
+          if (btn) btn.click();
+          else {
+            const form = input.closest('form');
+            if (form) form.submit();
+          }
+        }
+      },
+      args: [trackUrl]
+    });
+
+    await new Promise(r => setTimeout(r, 2500));
+
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const text = document.body ? document.body.innerText : '';
+        const isrcRegex = /[A-Z]{2}[A-Z0-9]{3}\d{7}/g;
+        const matches = text.match(isrcRegex) || [];
+        return matches[0] || '—';
+      }
+    });
+
+    return result?.result || '—';
+  } catch (err) {
+    addAiDebug('bg', 'scrapeIsrcFinderTab error', { error: err.message });
+    return '—';
+  } finally {
+    if (tab?.id) {
+      await chrome.tabs.remove(tab.id).catch(() => {});
+    }
+  }
 }
