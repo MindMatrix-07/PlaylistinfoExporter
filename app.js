@@ -987,10 +987,10 @@ async function resolveWebFetchTrackDetails() {
     return;
   }
 
-  showToast(`Fetching ISRCs for ${pending.length} track${pending.length === 1 ? '' : 's'}...`, 3500);
-  setLoading(true, `Fetching ISRCs (0 / ${pending.length})...`);
+  showToast(`Resolving details for ${pending.length} track${pending.length === 1 ? '' : 's'}...`, 3500);
+  setLoading(true, `Resolving details (0 / ${pending.length})...`);
 
-  // ── Step 0: Dual-Stage Batch ISRC Resolution (Browser Direct + Serverless Fallback) ──
+  // ── Step 0: Dual-Stage Batch ISRC Resolution (OAuth Browser + Serverless 2-Pass Engine) ──
   const trackIdToPending = {};
   pending.forEach(item => {
     const id = extractSpotifyTrackId(item.track.url || item.track.uri || item.track.link || '');
@@ -1002,10 +1002,10 @@ async function resolveWebFetchTrackDetails() {
     try {
       let isrcMap = null;
 
-      // 0a: Try direct browser-to-Spotify call (uses user's home IP, bypassing cloud server rate limits)
-      const clientToken = localStorage.getItem('sp_access_token') || await getBrowserSpotifyToken(trackIds[0]);
-      if (clientToken) {
-        console.log('[Batch ISRC] Attempting direct browser fetch to api.spotify.com...');
+      // 0a: Try direct browser-to-Spotify call (uses user OAuth token if logged in)
+      const userToken = localStorage.getItem('sp_access_token');
+      if (userToken) {
+        console.log('[Batch ISRC] Attempting direct browser fetch to api.spotify.com with OAuth token...');
         isrcMap = {};
         const BATCH_SIZE = 50;
         for (let i = 0; i < trackIds.length; i += BATCH_SIZE) {
@@ -1013,7 +1013,7 @@ async function resolveWebFetchTrackDetails() {
           const ids = batch.join(',');
           try {
             const res = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
-              headers: { 'Authorization': `Bearer ${clientToken}` }
+              headers: { 'Authorization': `Bearer ${userToken}` }
             });
             if (res.ok) {
               const d = await res.json();
@@ -1028,20 +1028,20 @@ async function resolveWebFetchTrackDetails() {
               });
             }
           } catch (e) {
-            console.warn('[Batch ISRC] Direct browser batch failed:', e.message);
+            console.warn('[Batch ISRC] Direct browser fetch failed:', e.message);
           }
         }
       }
 
-      // 0b: If browser direct call returned no ISRCs, fallback to Netlify serverless function
+      // 0b: Serverless 2-Pass Parallel Batch Resolution Fallback (v6.5)
       if (!isrcMap || Object.keys(isrcMap).length === 0) {
-        console.log('[Batch ISRC] Falling back to Netlify serverless endpoint...');
+        console.log('[Batch ISRC] Sending track IDs to Netlify 2-Pass Parallel Batch Engine...');
         const resp = await fetch('/api/spotify-batch-isrc', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
             trackIds,
-            accessToken: localStorage.getItem('sp_access_token') || ''
+            accessToken: userToken || ''
           })
         });
         if (resp.ok) {
@@ -1058,19 +1058,23 @@ async function resolveWebFetchTrackDetails() {
         Object.keys(isrcMap).forEach(id => {
           const item = trackIdToPending[id];
           const info = isrcMap[id];
-          if (item && info?.isrc) {
-            item.track.isrc = info.isrc;
-            if (!item.track.album || item.track.album === 'Unknown Album' || item.track.album === '—') {
-              item.track.album = info.albumName || '';
+          if (item && info) {
+            if (info.isrc && info.isrc !== '—') {
+              item.track.isrc = info.isrc;
             }
-            item.track.albumArt = item.track.albumArt || info.albumArt || '';
+            if (info.albumName && (!item.track.album || item.track.album === 'Unknown Album' || item.track.album === '—')) {
+              item.track.album = info.albumName;
+            }
+            if (info.albumArt && (!item.track.albumArt || item.track.albumArt.includes('placeholder'))) {
+              item.track.albumArt = info.albumArt;
+            }
             updateRenderedTrackDetails(item.track, item.index);
             batchCount++;
           }
         });
         console.log(`[Batch ISRC] Resolved ${batchCount}/${trackIds.length} tracks!`);
         if (batchCount > 0) {
-          showToast(`Resolved ${batchCount}/${trackIds.length} ISRCs via Spotify!`, 2500);
+          showToast(`Resolved ${batchCount}/${trackIds.length} track details!`, 2500);
         }
       }
     } catch (e) {
@@ -1106,11 +1110,6 @@ async function resolveWebFetchTrackDetails() {
     await Promise.all(oembedPromises);
   }
 
-  // ── Step 1: Fallback loop for any remaining unresolved tracks ───────────────
-  const stillPending = pending.filter(({ track }) => !track.isrc || track.isrc === '—');
-  let completed = pending.length - stillPending.length;
-
-  for (const item of stillPending) {
     await resolveOneWebFetchTrack(item.track, item.index);
     completed++;
     setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
