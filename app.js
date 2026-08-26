@@ -9,6 +9,37 @@ let activeMode = 'premium'; // 'premium' or 'web'
 const resultsPreviewAudio = new Audio();
 let activeResultsPreviewButton = null;
 
+// Cached anonymous Spotify token (from embed page) — valid for ~1 hour
+// Avoids re-fetching the embed page for every track that credits.fm misses
+const _spotifyAnonTokenCache = { token: null, expiresAt: 0 };
+
+async function getSpotifyAnonToken(trackId) {
+  // Return cached token if still valid (with 60s buffer)
+  if (_spotifyAnonTokenCache.token && Date.now() < _spotifyAnonTokenCache.expiresAt - 60000) {
+    return _spotifyAnonTokenCache.token;
+  }
+  try {
+    const resp = await fetch(`https://open.spotify.com/embed/track/${trackId}`);
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    const startTag = '<script id="__NEXT_DATA__" type="application/json">';
+    const s = html.indexOf(startTag);
+    if (s === -1) return null;
+    const jsonStart = s + startTag.length;
+    const jsonEnd = html.indexOf('</script>', jsonStart);
+    const data = JSON.parse(html.substring(jsonStart, jsonEnd));
+    const session = data?.props?.pageProps?.state?.settings?.session;
+    if (session?.accessToken) {
+      _spotifyAnonTokenCache.token = session.accessToken;
+      _spotifyAnonTokenCache.expiresAt = session.accessTokenExpirationTimestampMs || (Date.now() + 3600000);
+    }
+    return _spotifyAnonTokenCache.token || null;
+  } catch (e) {
+    console.warn('[Spotify Anon Token] Failed to get token:', e.message);
+    return null;
+  }
+}
+
 // Heuristic Language Detector
 function detectLanguage(title, isrc) {
   if (!title) return 'English';
@@ -984,8 +1015,7 @@ async function resolveOneWebFetchTrack(track, index) {
   }
 
   // Client-side fallback for Netlify timeouts (Netlify limits execution to 10s)
-  // Obscure tracks can take 14s+ on credits.fm, so we fetch directly from the browser
-  // which bypasses serverless execution limits since credits.fm allows CORS.
+  // Obscure tracks can take 14s+ on credits.fm, so we fetch directly from the browser.
   if (!track.isrc || track.isrc === '—') {
     try {
       const fallbackUrl = `https://api.credits.fm/v1/search?q=${encodeURIComponent(track.url)}&type=isrc&limit=1&offset=0`;
@@ -1001,6 +1031,41 @@ async function resolveOneWebFetchTrack(track, index) {
       }
     } catch (fallbackErr) {
       console.warn('[Web Fetch] Client-side credits.fm fallback failed:', track.name, fallbackErr.message);
+    }
+  }
+
+  // Spotify embed-page anon-token fallback — for tracks not indexed in credits.fm.
+  // The Spotify embed page exposes an anonymous bearer token in its __NEXT_DATA__ script.
+  // Browsers can fetch this cross-origin (it's designed for embedding). We use it
+  // to call the official Spotify /v1/tracks API which always returns external_ids.isrc.
+  if (!track.isrc || track.isrc === '—') {
+    try {
+      const trackId = track.url ? track.url.split('/track/').pop().split('?')[0] : null;
+      if (trackId) {
+        const anonToken = await getSpotifyAnonToken(trackId);
+        if (anonToken) {
+          const trackResp = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
+            headers: { 'Authorization': `Bearer ${anonToken}` }
+          });
+          if (trackResp.ok) {
+            const trackData = await trackResp.json();
+            const isrc = trackData?.external_ids?.isrc;
+            if (isrc) {
+              track.isrc = isrc;
+              track.album = track.album || trackData?.album?.name || '';
+              track.albumArt = track.albumArt || trackData?.album?.images?.[0]?.url || '';
+              updateRenderedTrackDetails(track, index);
+              console.log('[Spotify Anon]', track.name, '->', isrc);
+            }
+          } else if (trackResp.status === 429) {
+            // Token quota exceeded — clear cached token so next call gets a fresh one
+            _spotifyAnonTokenCache.token = null;
+            _spotifyAnonTokenCache.expiresAt = 0;
+          }
+        }
+      }
+    } catch (spotifyErr) {
+      console.warn('[Web Fetch] Spotify embed anon-token fallback failed:', track.name, spotifyErr.message);
     }
   }
 
