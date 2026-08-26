@@ -81,16 +81,16 @@ function cleanSongTitle(t) {
 
 async function fetchMusicBrainz(query) {
   try {
-    const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=25`;
+    const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=15`;
     const r = await fetch(url, {
-      headers: { 'User-Agent': 'PlaylistInfoExporter/6.4 (https://playlistinfoexporter.netlify.app)' }
+      headers: { 'User-Agent': 'PlaylistInfoExporter/6.8 (https://playlistinfoexporter.netlify.app)' }
     });
     if (r.ok) return await r.json();
   } catch (e) {}
   return null;
 }
 
-// 100% Free 2-Pass Parallel Resolution Engine v6.4
+// 3-Stage Robust Metadata & ISRC Resolution Engine v6.8
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -119,9 +119,8 @@ async function resolveTrackFreeFallback(trackId) {
     if (rawTitle) {
       const cleanTitle = cleanSongTitle(rawTitle);
       const firstArtist = artist ? artist.split(',')[0].split('&')[0].trim() : '';
-      const cleanTargetTitle = cleanTitle.toLowerCase();
 
-      // Parallel fetch: iTunes for Artwork/Album + Pass 1 MusicBrainz
+      // Parallel fetch: iTunes for Artwork/Album + Stage 1 MusicBrainz
       const [itunesRes, mbData1] = await Promise.all([
         fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + firstArtist)}&entity=song&limit=1`).then(res => res.json()).catch(() => null),
         fetchMusicBrainz(`recording:"${cleanTitle}"`)
@@ -134,24 +133,25 @@ async function resolveTrackFreeFallback(trackId) {
       }
 
       let recs = mbData1?.recordings || [];
-      let match = recs.find(rec => {
-        if (!rec.isrcs || !rec.isrcs.length) return false;
-        const recTitle = (rec.title || '').trim().toLowerCase().replace(/["'”]/g, '');
-        return recTitle === cleanTargetTitle || recTitle.includes(cleanTargetTitle) || cleanTargetTitle.includes(recTitle);
-      });
+      let match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
 
-      // Pass 2: Unquoted title search if Pass 1 gave no ISRC
+      // Stage 2: Broad search (cleanTitle + firstArtist)
       if (!match && cleanTitle) {
+        await new Promise(res => setTimeout(res, 100));
         const mbData2 = await fetchMusicBrainz(`${cleanTitle} ${firstArtist}`);
         recs = mbData2?.recordings || [];
-        match = recs.find(rec => {
-          if (!rec.isrcs || !rec.isrcs.length) return false;
-          const recTitle = (rec.title || '').trim().toLowerCase().replace(/["'”]/g, '');
-          return recTitle === cleanTargetTitle || recTitle.includes(cleanTargetTitle) || cleanTargetTitle.includes(recTitle);
-        });
+        match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
       }
 
-      if (match) {
+      // Stage 3: Broad search (cleanTitle alone)
+      if (!match && cleanTitle) {
+        await new Promise(res => setTimeout(res, 100));
+        const mbData3 = await fetchMusicBrainz(`${cleanTitle}`);
+        recs = mbData3?.recordings || [];
+        match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
+      }
+
+      if (match && match.isrcs && match.isrcs.length > 0) {
         isrc = match.isrcs[0];
       }
     }
@@ -251,16 +251,15 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── 2-Pass Staggered Fallback Engine v6.7: Process ALL chunk tracks ──
+    // ── 3-Stage Staggered Fallback Engine v6.8 ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[2-Pass Staggered Fallback v6.7] Resolving ${unhandledTrackIds.length} tracks...`);
+      console.log(`[3-Stage Staggered Fallback v6.8] Resolving ${unhandledTrackIds.length} tracks...`);
       for (const id of unhandledTrackIds) {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
           isrcMap[id] = info;
         }
-        // Small delay to keep MusicBrainz rate limits clear
-        await new Promise(r => setTimeout(r, 150));
+        await new Promise(r => setTimeout(r, 120));
       }
     }
 
