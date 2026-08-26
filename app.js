@@ -950,6 +950,25 @@ async function fetchPlaylist(_retried = false) {
 
 // ─── Results Rendering ────────────────────────
 
+async function getBrowserSpotifyToken(sampleTrackId) {
+  try {
+    const id = sampleTrackId || '4r4oQiB8CEOqeGugFAC0qJ';
+    const r = await fetch(`https://open.spotify.com/embed/track/${id}`);
+    if (!r.ok) return null;
+    const html = await r.text();
+    const startTag = '<script id="__NEXT_DATA__" type="application/json">';
+    const s = html.indexOf(startTag);
+    if (s === -1) return null;
+    const jsonStart = s + startTag.length;
+    const jsonEnd = html.indexOf('</script>', jsonStart);
+    const data = JSON.parse(html.substring(jsonStart, jsonEnd));
+    return data?.props?.pageProps?.state?.settings?.session?.accessToken || null;
+  } catch (e) {
+    console.warn('[Client Token] Failed to fetch token in browser:', e.message);
+    return null;
+  }
+}
+
 async function resolveWebFetchTrackDetails() {
   const pending = allTracks
     .map((track, index) => ({ track, index }))
@@ -964,8 +983,7 @@ async function resolveWebFetchTrackDetails() {
   showToast(`Fetching ISRCs for ${pending.length} track${pending.length === 1 ? '' : 's'}...`, 3500);
   setLoading(true, `Fetching ISRCs (0 / ${pending.length})...`);
 
-  // ── Step 0: Serverless Spotify Batch ISRC Fetch ────────────────────────────
-  // Resolves ~100% of track ISRCs in 1 single API call via serverless function.
+  // ── Step 0: Dual-Stage Batch ISRC Resolution (Browser Direct + Serverless Fallback) ──
   const trackIdToPending = {};
   pending.forEach(item => {
     const id = item.track.url?.split('/track/').pop()?.split('?')[0];
@@ -975,39 +993,81 @@ async function resolveWebFetchTrackDetails() {
   const trackIds = Object.keys(trackIdToPending);
   if (trackIds.length > 0) {
     try {
-      const resp = await fetch('/api/spotify-batch-isrc', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          trackIds,
-          accessToken: localStorage.getItem('sp_access_token') || ''
-        })
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.ok && data.isrcMap) {
-          let batchCount = 0;
-          Object.keys(data.isrcMap).forEach(id => {
-            const item = trackIdToPending[id];
-            const info = data.isrcMap[id];
-            if (item && info?.isrc) {
-              item.track.isrc = info.isrc;
-              if (!item.track.album || item.track.album === 'Unknown Album' || item.track.album === '—') {
-                item.track.album = info.albumName || '';
-              }
-              item.track.albumArt = item.track.albumArt || info.albumArt || '';
-              updateRenderedTrackDetails(item.track, item.index);
-              batchCount++;
+      let isrcMap = null;
+
+      // 0a: Try direct browser-to-Spotify call (uses user's home IP, bypassing cloud server rate limits)
+      const clientToken = localStorage.getItem('sp_access_token') || await getBrowserSpotifyToken(trackIds[0]);
+      if (clientToken) {
+        console.log('[Batch ISRC] Attempting direct browser fetch to api.spotify.com...');
+        isrcMap = {};
+        const BATCH_SIZE = 50;
+        for (let i = 0; i < trackIds.length; i += BATCH_SIZE) {
+          const batch = trackIds.slice(i, i + BATCH_SIZE);
+          const ids = batch.join(',');
+          try {
+            const res = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}`, {
+              headers: { 'Authorization': `Bearer ${clientToken}` }
+            });
+            if (res.ok) {
+              const d = await res.json();
+              (d.tracks || []).forEach(t => {
+                if (t && t.id && t.external_ids?.isrc) {
+                  isrcMap[t.id] = {
+                    isrc: t.external_ids.isrc,
+                    albumName: t.album?.name || '',
+                    albumArt: t.album?.images?.[0]?.url || ''
+                  };
+                }
+              });
             }
-          });
-          console.log(`[Batch ISRC] Resolved ${batchCount}/${trackIds.length} tracks via Serverless Spotify API`);
-          if (batchCount > 0) {
-            showToast(`Resolved ${batchCount}/${trackIds.length} ISRCs via Spotify!`, 2500);
+          } catch (e) {
+            console.warn('[Batch ISRC] Direct browser batch failed:', e.message);
           }
         }
       }
+
+      // 0b: If browser direct call returned no ISRCs, fallback to Netlify serverless function
+      if (!isrcMap || Object.keys(isrcMap).length === 0) {
+        console.log('[Batch ISRC] Falling back to Netlify serverless endpoint...');
+        const resp = await fetch('/api/spotify-batch-isrc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            trackIds,
+            accessToken: localStorage.getItem('sp_access_token') || ''
+          })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.ok && data.isrcMap) {
+            isrcMap = data.isrcMap;
+          }
+        }
+      }
+
+      // Apply resolved details to UI
+      if (isrcMap && Object.keys(isrcMap).length > 0) {
+        let batchCount = 0;
+        Object.keys(isrcMap).forEach(id => {
+          const item = trackIdToPending[id];
+          const info = isrcMap[id];
+          if (item && info?.isrc) {
+            item.track.isrc = info.isrc;
+            if (!item.track.album || item.track.album === 'Unknown Album' || item.track.album === '—') {
+              item.track.album = info.albumName || '';
+            }
+            item.track.albumArt = item.track.albumArt || info.albumArt || '';
+            updateRenderedTrackDetails(item.track, item.index);
+            batchCount++;
+          }
+        });
+        console.log(`[Batch ISRC] Resolved ${batchCount}/${trackIds.length} tracks!`);
+        if (batchCount > 0) {
+          showToast(`Resolved ${batchCount}/${trackIds.length} ISRCs via Spotify!`, 2500);
+        }
+      }
     } catch (e) {
-      console.warn('[Batch ISRC] Serverless batch failed:', e.message);
+      console.warn('[Batch ISRC] Resolution error:', e.message);
     }
   }
 
