@@ -989,7 +989,9 @@ async function resolveWebFetchTrackDetails() {
             const info = data.isrcMap[id];
             if (item && info?.isrc) {
               item.track.isrc = info.isrc;
-              item.track.album = item.track.album || info.albumName || '';
+              if (!item.track.album || item.track.album === 'Unknown Album' || item.track.album === '—') {
+                item.track.album = info.albumName || '';
+              }
               item.track.albumArt = item.track.albumArt || info.albumArt || '';
               updateRenderedTrackDetails(item.track, item.index);
               batchCount++;
