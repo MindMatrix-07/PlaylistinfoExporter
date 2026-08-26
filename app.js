@@ -1097,11 +1097,22 @@ function updateRenderedTrackDetails(track, index) {
     album.title = track.album || '';
   }
 
-  // Update album art thumbnail if we now have a URL (class used in renderResults template)
-  const thumb = row.querySelector('img.track-thumb, img.song-art');
-  if (thumb && track.albumArt) {
-    thumb.src = track.albumArt;
-    thumb.style.display = '';
+  // Update album art thumbnail if we now have a URL
+  if (track.albumArt) {
+    let thumb = row.querySelector('img.track-thumb, img.song-art');
+    if (thumb) {
+      thumb.src = track.albumArt;
+      thumb.style.display = '';
+    } else {
+      const placeholder = row.querySelector('.track-thumb-placeholder');
+      if (placeholder) {
+        const newImg = document.createElement('img');
+        newImg.className = 'track-thumb';
+        newImg.src = track.albumArt;
+        newImg.alt = '';
+        placeholder.parentNode.replaceChild(newImg, placeholder);
+      }
+    }
   }
 }
 
