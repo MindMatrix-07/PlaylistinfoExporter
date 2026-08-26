@@ -964,65 +964,57 @@ async function resolveWebFetchTrackDetails() {
   showToast(`Fetching ISRCs for ${pending.length} track${pending.length === 1 ? '' : 's'}...`, 3500);
   setLoading(true, `Fetching ISRCs (0 / ${pending.length})...`);
 
-  const trackIds = pending.map(({ track }) =>
-    track.url?.split('/track/').pop()?.split('?')[0]).filter(Boolean);
+  // ── Step 0: Serverless Spotify Batch ISRC Fetch ────────────────────────────
+  // Resolves ~100% of track ISRCs in 1 single API call via serverless function.
+  const trackIdToPending = {};
+  pending.forEach(item => {
+    const id = item.track.url?.split('/track/').pop()?.split('?')[0];
+    if (id) trackIdToPending[id] = item;
+  });
 
-  // ── Extension batch: fire unconditionally, resolve to {} if not available ──
-  // No flag check — just try it. The extension responds via postMessage.
-  // If extension isn't installed, the promise silently resolves to {} after 8s.
-  // Running in parallel with per-track loop — whichever resolves first wins.
-  const requestId = 'isrc_batch_' + Date.now();
-  const extBatchPromise = new Promise(resolve => {
-    const timer = setTimeout(() => {
-      window.removeEventListener('message', handler);
-      resolve({});
-    }, 8000);
-    const handler = e => {
-      if (e.data?.type === 'FROM_EXT_ISRC_BATCH_RESPONSE' && e.data.requestId === requestId) {
-        clearTimeout(timer);
-        window.removeEventListener('message', handler);
-        resolve(e.data.isrcMap || {});
-      }
-    };
-    window.addEventListener('message', handler);
-    window.postMessage({ type: 'FROM_PAGE_FETCH_ISRC_BATCH', trackIds, requestId }, '*');
-    console.log('[Ext] Batch ISRC request sent for', trackIds.length, 'tracks. Extension available:', window.__extAvailable);
-  }).then(isrcMap => {
-    const resolved = Object.keys(isrcMap).length;
-    if (resolved > 0) {
-      console.log(`[Ext Batch] Got ${resolved} ISRCs from extension`);
-      pending.forEach(({ track, index }) => {
-        const id = track.url?.split('/track/').pop()?.split('?')[0];
-        const data = id && isrcMap[id];
-        if (data?.isrc && (!track.isrc || track.isrc === '—')) {
-          track.isrc = data.isrc;
-          track.album = track.album || data.albumName || '';
-          track.albumArt = track.albumArt || data.albumArt || '';
-          updateRenderedTrackDetails(track, index);
-        }
+  const trackIds = Object.keys(trackIdToPending);
+  if (trackIds.length > 0) {
+    try {
+      const resp = await fetch('/api/spotify-batch-isrc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trackIds })
       });
-      showToast(`Got ${resolved}/${pending.length} ISRCs via Spotify (extension)`, 3000);
-    } else {
-      console.log('[Ext] No ISRCs from extension (not installed or no response)');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.ok && data.isrcMap) {
+          let batchCount = 0;
+          Object.keys(data.isrcMap).forEach(id => {
+            const item = trackIdToPending[id];
+            const info = data.isrcMap[id];
+            if (item && info?.isrc) {
+              item.track.isrc = info.isrc;
+              item.track.album = item.track.album || info.albumName || '';
+              item.track.albumArt = item.track.albumArt || info.albumArt || '';
+              updateRenderedTrackDetails(item.track, item.index);
+              batchCount++;
+            }
+          });
+          console.log(`[Batch ISRC] Resolved ${batchCount}/${trackIds.length} tracks via Serverless Spotify API`);
+          if (batchCount > 0) {
+            showToast(`Resolved ${batchCount}/${trackIds.length} ISRCs via Spotify!`, 2500);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Batch ISRC] Serverless batch failed:', e.message);
     }
-  }).catch(e => console.warn('[Ext Batch] Error:', e.message));
+  }
 
-  // ── Per-track fallback loop (runs immediately, parallel to extension batch) ──
-  let completed = 0;
-  for (const item of pending) {
-    // Skip if already resolved by the extension batch (check live)
-    if (item.track.isrc && item.track.isrc !== '—') {
-      completed++;
-      setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
-      continue;
-    }
+  // ── Step 1: Fallback loop for any remaining unresolved tracks ───────────────
+  const stillPending = pending.filter(({ track }) => !track.isrc || track.isrc === '—');
+  let completed = pending.length - stillPending.length;
+
+  for (const item of stillPending) {
     await resolveOneWebFetchTrack(item.track, item.index);
     completed++;
     setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
   }
-
-  // Wait for extension batch to finish applying its results too
-  await extBatchPromise;
 
   await enrichMissingPreviewUrls();
   await enrichAddedByProfiles(null, allTracks);
@@ -1030,6 +1022,7 @@ async function resolveWebFetchTrackDetails() {
   if (!aiDetectionInProgress) renderResults();
   showToast('Web Fetch details loaded.');
 }
+
 
 
 async function resolveOneWebFetchTrack(track, index) {
