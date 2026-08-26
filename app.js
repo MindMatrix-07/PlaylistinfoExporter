@@ -980,14 +980,67 @@ async function resolveWebFetchTrackDetails() {
   }
 
   showToast(`Fetching ISRCs for ${pending.length} track${pending.length === 1 ? '' : 's'}...`, 3500);
-
-  let completed = 0;
   setLoading(true, `Fetching ISRCs (0 / ${pending.length})...`);
 
-  for (const item of pending) {
+  // ── Step 0: Extension batch ISRC pre-fetch ──────────────────────────────────
+  // If the user has our extension installed AND has an open Spotify tab,
+  // we can get ALL ISRCs in 1-2 API calls using the web player's own auth token.
+  // This is the fastest, most reliable path — no 3rd party services needed.
+  const extInstalled = await new Promise(resolve => {
+    const timer = setTimeout(() => resolve(false), 500);
+    const handler = e => { if (e.data?.type === 'PONG_PLAYLIST_EXPORTER_EXT') { clearTimeout(timer); window.removeEventListener('message', handler); resolve(true); } };
+    window.addEventListener('message', handler);
+    window.postMessage({ type: 'PING_PLAYLIST_EXPORTER_EXT' }, '*');
+  });
+
+  if (extInstalled) {
+    try {
+      const trackIds = pending.map(({ track }) => track.url?.split('/track/').pop()?.split('?')[0]).filter(Boolean);
+      const requestId = 'isrc_batch_' + Date.now();
+      const isrcMap = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('Extension ISRC batch timed out')), 20000);
+        const handler = e => {
+          if (e.data?.type === 'FROM_EXT_ISRC_BATCH_RESPONSE' && e.data.requestId === requestId) {
+            clearTimeout(timer);
+            window.removeEventListener('message', handler);
+            resolve(e.data.isrcMap || {});
+          }
+        };
+        window.addEventListener('message', handler);
+        window.postMessage({ type: 'FROM_PAGE_FETCH_ISRC_BATCH', trackIds, requestId }, '*');
+      });
+
+      const resolved = Object.keys(isrcMap).length;
+      if (resolved > 0) {
+        console.log(`[Ext Batch] Got ${resolved} ISRCs from extension`);
+        // Apply the batch results to allTracks
+        pending.forEach(({ track, index }) => {
+          const id = track.url?.split('/track/').pop()?.split('?')[0];
+          const data = id && isrcMap[id];
+          if (data?.isrc) {
+            track.isrc = data.isrc;
+            track.album = track.album || data.albumName || '';
+            track.albumArt = track.albumArt || data.albumArt || '';
+            updateRenderedTrackDetails(track, index);
+          }
+        });
+        showToast(`Got ${resolved}/${pending.length} ISRCs via Spotify (extension)`, 2500);
+      }
+    } catch (e) {
+      console.warn('[Ext Batch] Extension ISRC batch failed:', e.message);
+    }
+  }
+
+  // ── Step 1: Per-track fallback for remaining unresolved tracks ──────────────
+  const stillPending = allTracks
+    .map((track, index) => ({ track, index }))
+    .filter(({ track }) => track.url && (!track.isrc || track.isrc === '—'));
+
+  let completed = 0;
+  for (const item of stillPending) {
     await resolveOneWebFetchTrack(item.track, item.index);
     completed++;
-    setLoading(true, `Fetching ISRCs (${completed} / ${pending.length})...`);
+    setLoading(true, `Fetching ISRCs (${completed} / ${stillPending.length})...`);
   }
 
   await enrichMissingPreviewUrls();
@@ -996,6 +1049,7 @@ async function resolveWebFetchTrackDetails() {
   if (!aiDetectionInProgress) renderResults();
   showToast('Web Fetch details loaded.');
 }
+
 
 async function resolveOneWebFetchTrack(track, index) {
   try {

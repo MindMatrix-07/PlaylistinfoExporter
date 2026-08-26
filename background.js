@@ -256,23 +256,90 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === 'GET_AI_DEBUG_LOG') {
-    sendResponse({ ok: true, entries: getAiDebugTail(160) });
-    return true;
-  }
-
-  if (message?.type === 'CLEAR_AI_DEBUG_LOG') {
-    aiDebugEntries.length = 0;
-    addAiDebug('bg', 'Background debug log cleared');
-    sendResponse({ ok: true });
+  if (message?.type === 'FETCH_ISRC_BATCH') {
+    fetchISRCBatch(message.trackIds || [])
+      .then(result => sendResponse({ ok: true, isrcMap: result }))
+      .catch(err => sendResponse({ ok: false, error: err.message, isrcMap: {} }));
     return true;
   }
 });
+
+// ─── Batch ISRC Fetch via Spotify Web Player Token ───────────────────────────
+// Uses the user's own Spotify login (available in any open Spotify tab) to
+// call the official Spotify API. Returns a map of { trackId -> { isrc, albumArt, albumName } }.
+// Batches up to 50 tracks per API call — full playlist resolved in 1-2 calls.
+
+async function getSpotifyWebPlayerToken() {
+  // Find any open Spotify tab
+  const tabs = await chrome.tabs.query({ url: 'https://open.spotify.com/*' });
+  if (!tabs.length) throw new Error('No open Spotify tab found');
+
+  // Inject a script to call get_access_token from the Spotify page context
+  // (works because the page has the sp_dc cookie)
+  const results = await chrome.scripting.executeScript({
+    target: { tabId: tabs[0].id },
+    func: async () => {
+      try {
+        const r = await fetch('/get_access_token?reason=transport&productType=web-player', {
+          credentials: 'include'
+        });
+        if (!r.ok) return null;
+        const d = await r.json();
+        return d.accessToken || null;
+      } catch (e) {
+        return null;
+      }
+    }
+  });
+
+  const token = results?.[0]?.result;
+  if (!token) throw new Error('Could not get Spotify web player token');
+  return token;
+}
+
+async function fetchISRCBatch(trackIds) {
+  if (!trackIds || trackIds.length === 0) return {};
+
+  const token = await getSpotifyWebPlayerToken();
+  const isrcMap = {};
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < trackIds.length; i += BATCH_SIZE) {
+    const batch = trackIds.slice(i, i + BATCH_SIZE);
+    const ids = batch.join(',');
+    try {
+      const r = await fetch(`https://api.spotify.com/v1/tracks?ids=${ids}&market=IN`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!r.ok) continue;
+      const d = await r.json();
+      (d.tracks || []).forEach(t => {
+        if (!t) return;
+        const id = t.id;
+        const isrc = t.external_ids?.isrc;
+        if (id && isrc) {
+          isrcMap[id] = {
+            isrc,
+            albumName: t.album?.name || '',
+            albumArt: t.album?.images?.[0]?.url || ''
+          };
+        }
+      });
+    } catch (e) {
+      console.warn('[ISRC Batch] Batch failed:', e.message);
+    }
+  }
+
+  console.log(`[ISRC Batch] Resolved ${Object.keys(isrcMap).length}/${trackIds.length} tracks`);
+  return isrcMap;
+}
+
 
 // ─── Scrape "Added by" from live Spotify tab ─────────────────────────────────
 
 async function scrapePlaylistAddedBy(playlistUrl, totalTracks) {
   if (!playlistUrl) throw new Error('No playlist URL provided');
+
 
   // Extract playlist ID from URL
   const playlistId = playlistUrl.match(/playlist\/([A-Za-z0-9]+)/)?.[1] || '';
