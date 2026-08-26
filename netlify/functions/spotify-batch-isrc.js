@@ -83,14 +83,14 @@ async function fetchMusicBrainz(query) {
   try {
     const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=15`;
     const r = await fetch(url, {
-      headers: { 'User-Agent': 'PlaylistInfoExporter/6.8 (https://playlistinfoexporter.netlify.app)' }
+      headers: { 'User-Agent': 'PlaylistInfoExporter/6.9 (https://playlistinfoexporter.netlify.app)' }
     });
     if (r.ok) return await r.json();
   } catch (e) {}
   return null;
 }
 
-// 3-Stage Robust Metadata & ISRC Resolution Engine v6.8
+// 3-Stage Robust Metadata & ISRC Resolution Engine v6.9
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -120,10 +120,10 @@ async function resolveTrackFreeFallback(trackId) {
       const cleanTitle = cleanSongTitle(rawTitle);
       const firstArtist = artist ? artist.split(',')[0].split('&')[0].trim() : '';
 
-      // Parallel fetch: iTunes for Artwork/Album + Stage 1 MusicBrainz
+      // Parallel fetch: iTunes for Artwork/Album + Stage 1 MusicBrainz (Title + Artist)
       const [itunesRes, mbData1] = await Promise.all([
         fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + firstArtist)}&entity=song&limit=1`).then(res => res.json()).catch(() => null),
-        fetchMusicBrainz(`recording:"${cleanTitle}"`)
+        fetchMusicBrainz(`${cleanTitle} ${firstArtist}`)
       ]);
 
       if (itunesRes?.results?.[0]) {
@@ -135,17 +135,17 @@ async function resolveTrackFreeFallback(trackId) {
       let recs = mbData1?.recordings || [];
       let match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
 
-      // Stage 2: Broad search (cleanTitle + firstArtist)
+      // Stage 2: Strict recording title search
       if (!match && cleanTitle) {
-        await new Promise(res => setTimeout(res, 100));
-        const mbData2 = await fetchMusicBrainz(`${cleanTitle} ${firstArtist}`);
+        await new Promise(res => setTimeout(res, 80));
+        const mbData2 = await fetchMusicBrainz(`recording:"${cleanTitle}"`);
         recs = mbData2?.recordings || [];
         match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
       }
 
-      // Stage 3: Broad search (cleanTitle alone)
+      // Stage 3: Title alone search (catches tracks where secondary artist or film composer was listed on Spotify)
       if (!match && cleanTitle) {
-        await new Promise(res => setTimeout(res, 100));
+        await new Promise(res => setTimeout(res, 80));
         const mbData3 = await fetchMusicBrainz(`${cleanTitle}`);
         recs = mbData3?.recordings || [];
         match = recs.find(rec => rec.isrcs && rec.isrcs.length > 0);
@@ -251,15 +251,15 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── 3-Stage Staggered Fallback Engine v6.8 ──
+    // ── 3-Stage Staggered Fallback Engine v6.9 ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[3-Stage Staggered Fallback v6.8] Resolving ${unhandledTrackIds.length} tracks...`);
+      console.log(`[3-Stage Staggered Fallback v6.9] Resolving ${unhandledTrackIds.length} tracks...`);
       for (const id of unhandledTrackIds) {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
           isrcMap[id] = info;
         }
-        await new Promise(r => setTimeout(r, 120));
+        await new Promise(r => setTimeout(r, 100));
       }
     }
 
