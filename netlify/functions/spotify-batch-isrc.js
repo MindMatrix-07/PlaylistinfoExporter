@@ -72,7 +72,7 @@ async function getSpotifyAnonToken(sampleTrackId) {
   return null;
 }
 
-// 100% Free Parallel Resolution Engine for tracks when Spotify API hits 429
+// 100% Free Parallel Resolution Engine v6.2 for tracks when Spotify API hits 429
 async function resolveTrackFreeFallback(trackId) {
   try {
     const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
@@ -100,11 +100,13 @@ async function resolveTrackFreeFallback(trackId) {
 
     if (title && artist) {
       const cleanTitle = title.split('(')[0].split('-')[0].trim();
-      
+      const firstArtist = artist.split(',')[0].split('&')[0].trim();
+      const mbQuery = `${cleanTitle} ${firstArtist}`;
+
       const [itunesRes, mbRes] = await Promise.allSettled([
-        fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + artist)}&entity=song&limit=1`).then(res => res.json()),
-        fetch(`https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(`recording:"${cleanTitle}" AND artist:"${artist}"`)}&fmt=json&limit=1`, {
-          headers: { 'User-Agent': 'PlaylistInfoExporter/5.9 (https://playlistinfoexporter.netlify.app)' }
+        fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + firstArtist)}&entity=song&limit=1`).then(res => res.json()),
+        fetch(`https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(mbQuery)}&fmt=json&limit=10`, {
+          headers: { 'User-Agent': 'PlaylistInfoExporter/6.2 (https://playlistinfoexporter.netlify.app)' }
         }).then(res => res.json())
       ]);
 
@@ -114,8 +116,11 @@ async function resolveTrackFreeFallback(trackId) {
         if (match.artworkUrl100) albumArt = match.artworkUrl100.replace('100x100bb', '600x600bb');
       }
 
-      if (mbRes.status === 'fulfilled' && mbRes.value?.recordings?.[0]?.isrcs?.length) {
-        isrc = mbRes.value.recordings[0].isrcs[0];
+      if (mbRes.status === 'fulfilled' && mbRes.value?.recordings?.length) {
+        const matchWithIsrc = mbRes.value.recordings.find(rec => rec.isrcs && rec.isrcs.length > 0);
+        if (matchWithIsrc) {
+          isrc = matchWithIsrc.isrcs[0];
+        }
       }
     }
 
@@ -214,9 +219,9 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── Parallel Fallback Engine: Process ALL unhandled tracks without 25-item slice limit ──
+    // ── Parallel Fallback Engine v6.2: Process ALL unhandled tracks with Lucene scan ──
     if (unhandledTrackIds.length > 0) {
-      console.log(`[Parallel Fallback] Resolving ALL ${unhandledTrackIds.length} tracks in parallel...`);
+      console.log(`[Parallel Fallback v6.2] Resolving ALL ${unhandledTrackIds.length} tracks...`);
       const fallbackPromises = unhandledTrackIds.map(async id => {
         const info = await resolveTrackFreeFallback(id);
         if (info) {
