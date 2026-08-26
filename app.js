@@ -969,10 +969,17 @@ async function getBrowserSpotifyToken(sampleTrackId) {
   }
 }
 
+function extractSpotifyTrackId(str) {
+  if (!str) return '';
+  const clean = str.split('?')[0];
+  const parts = clean.split(/[\/:=]/);
+  return parts[parts.length - 1] || '';
+}
+
 async function resolveWebFetchTrackDetails() {
   const pending = allTracks
     .map((track, index) => ({ track, index }))
-    .filter(({ track }) => track.url && (!track.isrc || track.isrc === '—'));
+    .filter(({ track }) => (track.url || track.uri || track.link) && (!track.isrc || track.isrc === '—'));
 
   if (!pending.length) {
     await enrichMissingPreviewUrls();
@@ -986,7 +993,7 @@ async function resolveWebFetchTrackDetails() {
   // ── Step 0: Dual-Stage Batch ISRC Resolution (Browser Direct + Serverless Fallback) ──
   const trackIdToPending = {};
   pending.forEach(item => {
-    const id = item.track.url?.split('/track/').pop()?.split('?')[0];
+    const id = extractSpotifyTrackId(item.track.url || item.track.uri || item.track.link || '');
     if (id) trackIdToPending[id] = item;
   });
 
