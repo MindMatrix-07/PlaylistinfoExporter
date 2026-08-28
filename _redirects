@@ -1,0 +1,4 @@
+# Cloudflare Pages Redirects
+/api/spotify-info /api/spotify-info 200
+/api/spotify-track-details /api/spotify-track-details 200
+/api/spotify-batch-isrc /api/spotify-batch-isrc 200

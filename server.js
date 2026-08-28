@@ -4,6 +4,7 @@ const path = require('path');
 
 const spotifyInfoHandler = require('./api/spotify-info');
 const spotifyTrackDetailsHandler = require('./api/spotify-track-details');
+const spotifyBatchIsrcHandler = require('./api/spotify-batch-isrc');
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
@@ -34,6 +35,19 @@ const server = http.createServer(async (req, res) => {
     req.query = Object.fromEntries(parsedUrl.searchParams.entries());
     addVercelResponseHelpers(res);
     await spotifyTrackDetailsHandler(req, res);
+    return;
+  }
+
+  if (parsedUrl.pathname === '/api/spotify-batch-isrc') {
+    req.query = Object.fromEntries(parsedUrl.searchParams.entries());
+    addVercelResponseHelpers(res);
+
+    let bodyStr = '';
+    req.on('data', chunk => { bodyStr += chunk; });
+    req.on('end', async () => {
+      req.body = bodyStr;
+      await spotifyBatchIsrcHandler(req, res);
+    });
     return;
   }
 

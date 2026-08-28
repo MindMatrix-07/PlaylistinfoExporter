@@ -22,11 +22,13 @@ A beautiful, dark-themed web app to export any **public Spotify playlist** to PD
 
 Just open `index.html` in any browser — no build step required.
 
-## ☁️ Deploy to Vercel
+## ☁️ Deployment
 
-Click below or connect this repo on [vercel.com](https://vercel.com):
+- **Cloudflare Pages**: Connect this repository to Cloudflare Pages (Build output: `.`). Functions in `functions/api/` are automatically routed.
+- **Vercel**: Import project into Vercel (`vercel.json` included).
+- **Netlify**: Import project into Netlify (`netlify.toml` included).
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/MindMatrix-07/PlaylistinfoExporter)
+See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step hosting instructions.
 
 ## 📦 Tech Stack
 

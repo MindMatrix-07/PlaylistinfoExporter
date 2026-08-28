@@ -2,10 +2,15 @@
   "functions": {
     "api/spotify-info.js": {
       "maxDuration": 60
+    },
+    "api/spotify-batch-isrc.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
     { "source": "/api/spotify-info", "destination": "/api/spotify-info.js" },
+    { "source": "/api/spotify-track-details", "destination": "/api/spotify-track-details.js" },
+    { "source": "/api/spotify-batch-isrc", "destination": "/api/spotify-batch-isrc.js" },
     { "source": "/test.html", "destination": "/test.html" },
     { "source": "/test-app.js", "destination": "/test-app.js" },
     { "source": "/((?!api/|test\\.html|test-app\\.js|.*\\.css|.*\\.zip|.*\\.png|.*\\.jpg|.*\\.js).*)", "destination": "/index.html" }

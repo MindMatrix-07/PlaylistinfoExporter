@@ -1109,14 +1109,14 @@ async function resolveWebFetchTrackDetails() {
         }
       }
 
-      // ── Step 0b2: Concentrated Multi-Pass Retry Engine for '—' Outputs (v8.0) ──
+      // ── Step 0b2: Concentrated 4-Song Chunk Multi-Pass Retry Engine for '—' Outputs (v8.1) ──
       let unrecoveredPending = pending.filter(item => !item.track.isrc || item.track.isrc === '—');
       let retryPass = 1;
-      const MAX_RETRY_PASSES = 2;
+      const MAX_RETRY_PASSES = 3;
 
       while (unrecoveredPending.length > 0 && retryPass <= MAX_RETRY_PASSES) {
-        console.log(`[Batch ISRC Retry Pass ${retryPass + 1}] Reorganizing ${unrecoveredPending.length} unrecovered tracks for retry...`);
-        showToast(`Pass ${retryPass + 1}: Re-fetching ${unrecoveredPending.length} missing track ISRCs...`, 3000);
+        console.log(`[Batch ISRC Retry Pass ${retryPass + 1}] Reorganizing ${unrecoveredPending.length} unrecovered tracks into 4-song chunks for retry...`);
+        showToast(`Pass ${retryPass + 1}: Re-fetching ${unrecoveredPending.length} missing track ISRCs in 4-song batches...`, 3000);
         setLoading(true, `Retry Pass ${retryPass + 1} (${unrecoveredPending.length} tracks remaining)...`);
 
         const retryTrackIds = unrecoveredPending
@@ -1130,6 +1130,9 @@ async function resolveWebFetchTrackDetails() {
 
         for (let i = 0; i < retryTrackIds.length; i += CHUNK_SIZE) {
           const chunk = retryTrackIds.slice(i, i + CHUNK_SIZE);
+          const currentCount = Math.min(i + CHUNK_SIZE, retryTrackIds.length);
+          setLoading(true, `Retry Pass ${retryPass + 1}: chunking (${currentCount} / ${retryTrackIds.length})...`);
+          
           try {
             const resp = await fetch('/api/spotify-batch-isrc', {
               method: 'POST',
@@ -1159,7 +1162,7 @@ async function resolveWebFetchTrackDetails() {
           } catch (err) {
             console.warn(`[Retry Pass ${retryPass + 1}] Chunk failed:`, err.message);
           }
-          await new Promise(r => setTimeout(r, 250));
+          await new Promise(r => setTimeout(r, 200));
         }
 
         console.log(`[Retry Pass ${retryPass + 1}] Recovered ${recoveredInPass} additional ISRCs!`);
@@ -1167,43 +1170,6 @@ async function resolveWebFetchTrackDetails() {
         
         if (recoveredInPass === 0) break;
         retryPass++;
-      }
-
-      // 0c: Extension-Assisted ISRCFinder Sequential Worker (v7.6)
-      if (window.__extAvailable) {
-        const stillPending = pending.filter(item => !item.track.isrc || item.track.isrc === '—');
-        if (stillPending.length > 0) {
-          console.log(`[Ext ISRCFinder] Resolving remaining ${stillPending.length} tracks via Extension ISRCFinder Worker...`);
-          
-          for (let k = 0; k < stillPending.length; k++) {
-            const item = stillPending[k];
-            setLoading(true, `Extension ISRCFinder (${k + 1} / ${stillPending.length}): ${item.track.name}...`);
-            
-            const reqId = 'isrcfinder_' + Date.now() + '_' + k;
-            const extIsrc = await new Promise((resolve) => {
-              const timer = setTimeout(() => resolve('—'), 15000);
-              function onResponse(evt) {
-                if (evt.data?.type === 'FROM_EXT_SCRAPE_ISRC_FINDER_RESPONSE' && evt.data?.requestId === reqId) {
-                  clearTimeout(timer);
-                  window.removeEventListener('message', onResponse);
-                  resolve(evt.data?.isrc || '—');
-                }
-              }
-              window.addEventListener('message', onResponse);
-              window.postMessage({
-                type: 'FROM_PAGE_SCRAPE_ISRC_FINDER',
-                trackUrl: item.track.url || item.track.link || item.track.uri,
-                requestId: reqId
-              }, '*');
-            });
-
-            if (extIsrc && extIsrc !== '—') {
-              item.track.isrc = extIsrc;
-              updateRenderedTrackDetails(item.track, item.index);
-              showToast(`ISRCFinder: ${item.track.name} -> ${extIsrc}`, 2000);
-            }
-          }
-        }
       }
     } catch (e) {
       console.warn('[Batch ISRC] Resolution error:', e.message);

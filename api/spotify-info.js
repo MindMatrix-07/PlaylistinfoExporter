@@ -343,7 +343,7 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
     const albumArt = creditsFmResult.albumArt ||
       await fetchSpotifyOembedAlbumArt(trackId) ||
       playlistImage;
-    
+
     // credits.fm doesn't return album names, so fetch it directly from Spotify
     let albumName = creditsFmResult.albumName;
     if (!albumName || albumName === 'Unknown Album') {
@@ -374,7 +374,7 @@ async function fetchSoundplateDetails(track, playlistImage, options = {}) {
         const albumArt = data.artwork_url ||
           await fetchSpotifyOembedAlbumArt(trackId) ||
           playlistImage;
-        
+
         let albumName = data.album;
         if (!albumName || albumName === 'Unknown Album') {
           albumName = await fetchSpotifyAlbumName(trackId) || 'Unknown Album';
@@ -467,7 +467,7 @@ async function fetchCreditsFmISRC(spotifyTrackUrl) {
     const res = await fetchWithTimeout(apiUrl, { headers: CREDITS_FM_HEADERS }, TIMEOUT_MS);
     if (!res.ok) {
       console.warn(`[credits.fm] HTTP ${res.status}`);
-      return null; 
+      return null;
     }
     const data = await res.json().catch(() => null);
     const recording = data?.recordings?.items?.[0];

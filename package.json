@@ -5,7 +5,10 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "echo 'Static site ready for Cloudflare Pages'",
+    "pages:dev": "npx wrangler pages dev .",
+    "pages:deploy": "npx wrangler pages deploy . --project-name=playlist-info-exporter"
   },
   "dependencies": {
     "isomorphic-unfetch": "^4.0.2",
