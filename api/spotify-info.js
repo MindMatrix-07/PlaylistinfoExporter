@@ -1,4 +1,4 @@
-const fetch = require('isomorphic-unfetch');
+// Native fetch is available globally in Node 18+ and Cloudflare Workers
 
 // Dynamic require for spotify-url-info to avoid initialization errors
 let spotifyUrlInfo;
