@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "playlistinfoexporter",
+  "compatibility_date": "2026-08-26",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": ".",
+    "exclude": [
+      "node_modules/**",
+      ".git/**",
+      ".github/**",
+      ".wrangler/**",
+      "*.zip",
+      "*.log",
+      "test-*.js",
+      "inspect-*.js",
+      "debug-*.js",
+      "verify-*.js",
+      "output-har-isrcfinder.txt"
+    ]
+  }
+}
