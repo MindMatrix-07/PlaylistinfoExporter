@@ -1,0 +1,20 @@
+# Ignore node_modules and build artifacts from Cloudflare static asset uploads
+node_modules/
+.git/
+.github/
+.wrangler/
+Dockerfile
+.dockerignore
+*.zip
+output-har-isrcfinder.txt
+test-*.js
+inspect-*.js
+scratch_test.js
+verify-*.js
+debug-*.js
+find-*.js
+google-*.js
+list-*.js
+read-*.js
+resolve-*.js
+search-*.js
