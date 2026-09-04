@@ -79,6 +79,8 @@ window.addEventListener("message", (event) => {
         }
       }
     );
+  }
+
   if (event.data?.type === 'FROM_PAGE_SCRAPE_ISRC_FINDER') {
     const { trackUrl, requestId } = event.data;
     chrome.runtime.sendMessage(
