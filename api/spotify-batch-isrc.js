@@ -75,7 +75,7 @@ async function getSpotifyAnonToken(sampleTrackId) {
 }
 
 async function resolveTrackFreeFallback(trackId) {
-  // unchainedmusic.io — fast, no auth, no rate limit, real ISRCs
+  // Primary: unchainedmusic.io — fast, no auth, no rate limit, real ISRCs
   try {
     const r = await fetch(`https://www.unchainedmusic.io/api/lookup?track=${trackId}`, {
       headers: {
@@ -93,6 +93,32 @@ async function resolveTrackFreeFallback(trackId) {
   } catch (e) {
     console.warn('[Batch ISRC] unchainedmusic fallback failed:', e.message);
   }
+
+  // Secondary: wallstream.com — also no auth, returns full Spotify track object
+  try {
+    const r = await fetch(`https://tools.wallstream.com/api/spotify/isrc?url=https://open.spotify.com/track/${trackId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://tools.wallstream.com/isrc-lookup'
+      }
+    });
+    if (r.ok) {
+      const d = await r.json();
+      const track = d?.item || d;
+      const isrc = track?.external_ids?.isrc;
+      if (isrc) {
+        return {
+          isrc,
+          albumName: track?.album?.name || '',
+          albumArt: track?.album?.images?.[0]?.url || ''
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('[Batch ISRC] wallstream fallback failed:', e.message);
+  }
+
   return null;
 }
 
