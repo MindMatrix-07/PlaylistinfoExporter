@@ -1,91 +1,124 @@
-const spotifyTrackDetailsHandler = require('../../api/spotify-track-details');
+// Cloudflare Pages Function — pure ESM, uses native fetch only
+
+const SOUNDPLATE_API = 'https://phpstack-822472-6184058.cloudwaysapps.com/api/spotify.php';
+const CREDITS_FM_SEARCH = 'https://api.credits.fm/v1/search';
+
+function cors() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With'
+  };
+}
+
+function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...cors(), 'content-type': 'application/json; charset=utf-8' }
+  });
+}
+
+async function getClientToken(clientId, clientSecret) {
+  if (!clientId || !clientSecret) return null;
+  try {
+    const r = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${btoa(`${clientId}:${clientSecret}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'grant_type=client_credentials'
+    });
+    if (r.ok) { const d = await r.json(); return d.access_token || null; }
+  } catch (e) { /* ignore */ }
+  return null;
+}
+
+async function fetchCreditsFm(spotifyUrl) {
+  try {
+    const signal = AbortSignal.timeout(7000);
+    const r = await fetch(`${CREDITS_FM_SEARCH}?q=${encodeURIComponent(spotifyUrl)}&type=isrc&limit=1&offset=0`, {
+      signal, headers: { 'User-Agent': 'PlaylistInfoExporter/3.0' }
+    });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    const rec = d?.recordings?.items?.[0];
+    if (!rec?.isrc) return null;
+    return { isrc: rec.isrc, albumArt: rec.cover_art_url || '' };
+  } catch (e) { return null; }
+}
+
+async function fetchSoundplate(trackUrl) {
+  try {
+    const signal = AbortSignal.timeout(5000);
+    const r = await fetch(`${SOUNDPLATE_API}?q=${encodeURIComponent(trackUrl)}`, {
+      signal,
+      headers: { 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    if (!d?.isrc) return null;
+    return { isrc: d.isrc, albumArt: d.artwork_url || '' };
+  } catch (e) { return null; }
+}
+
+async function fetchOembedArt(trackId) {
+  try {
+    const r = await fetch(`https://open.spotify.com/oembed?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2F${trackId}`);
+    if (!r.ok) return '';
+    const d = await r.json().catch(() => null);
+    return d?.thumbnail_url || '';
+  } catch (e) { return ''; }
+}
 
 export async function onRequest(context) {
   const { request, env } = context;
+  if (request.method === 'OPTIONS') return new Response(null, { status: 200, headers: cors() });
 
-  if (env) {
-    if (env.SPOTIFY_CLIENT_ID) process.env.SPOTIFY_CLIENT_ID = env.SPOTIFY_CLIENT_ID;
-    if (env.SPOTIFY_CLIENT_SECRET) process.env.SPOTIFY_CLIENT_SECRET = env.SPOTIFY_CLIENT_SECRET;
-  }
+  const reqUrl = new URL(request.url);
+  const trackId = reqUrl.searchParams.get('id') || '';
+  const spotifyUrl = reqUrl.searchParams.get('url') || (trackId ? `https://open.spotify.com/track/${trackId}` : '');
 
-  if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders()
-    });
-  }
+  if (!trackId && !spotifyUrl) return json({ error: 'Missing id or url parameter.' }, 400);
 
-  const url = new URL(request.url);
-  const query = Object.fromEntries(url.searchParams.entries());
-
-  let bodyData = null;
-  if (request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') {
-    try {
-      bodyData = await request.json();
-    } catch (e) {
-      try {
-        bodyData = await request.text();
-      } catch (_) {}
-    }
-  }
-
-  const req = {
-    method: request.method,
-    url: request.url,
-    query,
-    body: bodyData,
-    headers: Object.fromEntries(request.headers.entries())
-  };
-
-  let statusCode = 200;
-  const responseHeaders = corsHeaders();
-  let responseBody = '';
-
-  const res = {
-    statusCode: 200,
-    setHeader(key, value) {
-      responseHeaders[key] = value;
-    },
-    status(code) {
-      statusCode = code;
-      this.statusCode = code;
-      return this;
-    },
-    json(body) {
-      responseHeaders['content-type'] = 'application/json; charset=utf-8';
-      responseBody = JSON.stringify(body);
-    },
-    end(body = '') {
-      if (typeof body === 'object') {
-        responseHeaders['content-type'] = 'application/json; charset=utf-8';
-        responseBody = JSON.stringify(body);
-      } else {
-        responseBody = body;
-      }
-    }
-  };
+  const clientId = env?.SPOTIFY_CLIENT_ID || '';
+  const clientSecret = env?.SPOTIFY_CLIENT_SECRET || '';
 
   try {
-    await spotifyTrackDetailsHandler(req, res);
-    return new Response(responseBody, {
-      status: statusCode,
-      headers: responseHeaders
-    });
-  } catch (err) {
-    return new Response(JSON.stringify({ error: err.message || 'Server error' }), {
-      status: 500,
-      headers: {
-        ...corsHeaders(),
-        'content-type': 'application/json; charset=utf-8'
-      }
-    });
-  }
-}
+    let isrc = '—';
+    let albumArt = '';
+    let albumName = 'Unknown Album';
 
-function corsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PATCH, DELETE, PUT',
-    'Access-Control-Allow-Headers': 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
-  };
+    // Step 1: Official Spotify API (most reliable)
+    if (trackId && clientId && clientSecret) {
+      const token = await getClientToken(clientId, clientSecret);
+      if (token) {
+        const r = await fetch(`https://api.spotify.com/v1/tracks/${trackId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (r.ok) {
+          const d = await r.json();
+          isrc = d?.external_ids?.isrc || '—';
+          albumArt = d?.album?.images?.[0]?.url || '';
+          albumName = d?.album?.name || 'Unknown Album';
+        }
+      }
+    }
+
+    // Step 2: credits.fm fallback
+    if (isrc === '—' && spotifyUrl) {
+      const r = await fetchCreditsFm(spotifyUrl);
+      if (r) { isrc = r.isrc || '—'; albumArt = albumArt || r.albumArt; }
+    }
+
+    // Step 3: Soundplate fallback
+    if (isrc === '—' && spotifyUrl) {
+      const r = await fetchSoundplate(spotifyUrl);
+      if (r) { isrc = r.isrc || '—'; albumArt = albumArt || r.albumArt; }
+    }
+
+    // Step 4: oEmbed for album art if still missing
+    if (!albumArt && trackId) albumArt = await fetchOembedArt(trackId);
+
+    return json({ isrc, albumArt, albumName });
+  } catch (err) {
+    return json({ error: err.message || 'Server error' }, 500);
+  }
 }

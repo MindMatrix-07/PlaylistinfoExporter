@@ -1,19 +1,4 @@
 name = "playlistinfoexporter"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
-
-[assets]
-directory = "."
-exclude = [
-  "node_modules/**",
-  ".git/**",
-  ".github/**",
-  ".wrangler/**",
-  "*.zip",
-  "*.log",
-  "test-*.js",
-  "inspect-*.js",
-  "debug-*.js",
-  "verify-*.js",
-  "output-har-isrcfinder.txt"
-]
+pages_build_output_dir = "."
