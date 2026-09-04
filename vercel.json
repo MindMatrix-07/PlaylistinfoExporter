@@ -1,4 +1,8 @@
 {
+  "outputDirectory": ".",
+  "buildCommand": "",
+  "installCommand": "npm install",
+  "framework": null,
   "functions": {
     "api/spotify-info.js": {
       "maxDuration": 60
@@ -7,6 +11,21 @@
       "maxDuration": 60
     }
   },
+  "headers": [
+    {
+      "source": "/app.js",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
+        { "key": "Pragma", "value": "no-cache" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/api/spotify-info", "destination": "/api/spotify-info.js" },
     { "source": "/api/spotify-track-details", "destination": "/api/spotify-track-details.js" },

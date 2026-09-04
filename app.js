@@ -251,7 +251,7 @@ function disconnectSpotify() {
 
 function setFetchMode(mode) {
   if (mode === 'web' && !isWebFetchHost()) {
-    window.location.href = PAGES_ORIGIN + '/';
+    window.location.href = 'https://playlistinfoexporter.pages.dev/';
     return;
   }
 
