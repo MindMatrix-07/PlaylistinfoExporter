@@ -74,111 +74,26 @@ async function getSpotifyAnonToken(sampleTrackId) {
   return null;
 }
 
-function cleanSongTitle(t) {
-  if (!t) return '';
-  let s = t.split('(')[0].split('-')[0].trim();
-  s = s.replace(/["'”]/g, '').trim();
-  return s;
-}
-
-async function fetchMusicBrainz(query) {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2200);
-    const url = `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=25&inc=isrcs`;
-    const r = await fetch(url, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'PlaylistInfoExporter/7.4 (https://playlistinfoexporter.netlify.app)' }
-    });
-    clearTimeout(timeout);
-    if (r.ok) return await r.json();
-  } catch (e) {}
-  return null;
-}
-
 async function resolveTrackFreeFallback(trackId) {
+  // unchainedmusic.io — fast, no auth, no rate limit, real ISRCs
   try {
-    const embedUrl = `https://open.spotify.com/embed/track/${trackId}`;
-    const r = await fetch(embedUrl, {
+    const r = await fetch(`https://www.unchainedmusic.io/api/lookup?track=${trackId}`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://www.unchainedmusic.io/tools/isrc-checker/'
       }
     });
-    if (!r.ok) return null;
-    const html = await r.text();
-    const startTag = '<script id="__NEXT_DATA__" type="application/json">';
-    const s = html.indexOf(startTag);
-    if (s === -1) return null;
-    const jsonStart = s + startTag.length;
-    const jsonEnd = html.indexOf('</script>', jsonStart);
-    const data = JSON.parse(html.substring(jsonStart, jsonEnd));
-    const entity = data?.props?.pageProps?.state?.data?.entity;
-    if (!entity) return null;
-
-    const rawTitle = entity.title || entity.name || '';
-    const artistsArr = (entity.artists || []).map(a => a.name).join(' ');
-    const artist = entity.artists?.[0]?.name || '';
-    let albumArt = entity.visualIdentity?.image?.[0]?.url || '';
-    let albumName = rawTitle;
-    let isrc = '—';
-
-    if (rawTitle) {
-      const cleanTitle = cleanSongTitle(rawTitle);
-      const firstArtist = artist ? artist.split(',')[0].split('&')[0].trim() : '';
-
-      const [itunesRes, mbData1] = await Promise.all([
-        fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(cleanTitle + ' ' + firstArtist)}&entity=song&limit=1`).then(res => res.json()).catch(() => null),
-        fetchMusicBrainz(`${cleanTitle} ${firstArtist}`)
-      ]);
-
-      if (itunesRes?.results?.[0]) {
-        const match = itunesRes.results[0];
-        if (match.collectionName) albumName = match.collectionName;
-        if (match.artworkUrl100) albumArt = match.artworkUrl100.replace('100x100bb', '600x600bb');
-      }
-
-      let recs = mbData1?.recordings || [];
-      
-      const isOfficialMatch = (rec) => {
-        if (!rec.isrcs || !rec.isrcs.length) return false;
-        const recTitle = (rec.title || '').toLowerCase();
-        const artistCredit = (rec['artist-credit'] || []).map(a => (a.name || a.artist?.name || '').toLowerCase()).join(' ');
-        
-        if (recTitle.includes('8-bit') || recTitle.includes('karaoke') || recTitle.includes('tribute') || recTitle.includes('cover')) {
-          return false;
-        }
-
-        const lowerCleanTitle = cleanTitle.toLowerCase();
-        const lowerFirstArtist = firstArtist.toLowerCase();
-
-        const titleMatches = recTitle.includes(lowerCleanTitle) || lowerCleanTitle.includes(recTitle);
-        const artistMatches = artistCredit.includes(lowerFirstArtist) || recTitle.includes(lowerFirstArtist);
-
-        return titleMatches && artistMatches;
-      };
-
-      let match = recs.find(isOfficialMatch);
-
-      if (!match && cleanTitle && artistsArr) {
-        await new Promise(res => setTimeout(res, 50));
-        const mbData2 = await fetchMusicBrainz(`${cleanTitle} ${artistsArr.replace(/,/g, ' ')}`);
-        recs = mbData2?.recordings || [];
-        match = recs.find(isOfficialMatch);
-      }
-
-      if (match && match.isrcs && match.isrcs.length > 0) {
-        isrc = match.isrcs[0];
+    if (r.ok) {
+      const d = await r.json();
+      if (d.found && d.isrc) {
+        return { isrc: d.isrc, albumName: d.album || '', albumArt: d.artwork || '' };
       }
     }
-
-    return {
-      isrc,
-      albumName,
-      albumArt
-    };
   } catch (e) {
-    return null;
+    console.warn('[Batch ISRC] unchainedmusic fallback failed:', e.message);
   }
+  return null;
 }
 
 module.exports = async function spotifyBatchIsrcHandler(req, res) {

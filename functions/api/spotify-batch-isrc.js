@@ -46,88 +46,28 @@ async function getSpotifyAnonToken(sampleTrackId) {
   return null;
 }
 
-function cleanTitle(t) {
-  if (!t) return '';
-  return t.split('(')[0].split('-')[0].replace(/["""]/g, '').trim();
-}
-
-async function fetchMusicBrainz(query) {
-  try {
-    const signal = AbortSignal.timeout(2500);
-    const r = await fetch(
-      `https://musicbrainz.org/ws/2/recording?query=${encodeURIComponent(query)}&fmt=json&limit=25&inc=isrcs`,
-      { signal, headers: { 'User-Agent': 'PlaylistInfoExporter/7.4 (https://playlistinfoexporter.pages.dev)' } }
-    );
-    if (r.ok) return await r.json();
-  } catch (e) { /* ignore */ }
-  return null;
-}
-
 async function resolveTrackFreeFallback(trackId) {
+  // Primary: unchainedmusic.io — fast, no auth, no rate limit
   try {
-    const r = await fetch(`https://open.spotify.com/embed/track/${trackId}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-    if (!r.ok) return null;
-    const html = await r.text();
-    const tag = '<script id="__NEXT_DATA__" type="application/json">';
-    const s = html.indexOf(tag);
-    if (s === -1) return null;
-    const data = JSON.parse(html.substring(s + tag.length, html.indexOf('</script>', s + tag.length)));
-    const entity = data?.props?.pageProps?.state?.data?.entity;
-    if (!entity) return null;
-
-    const rawTitle = entity.title || entity.name || '';
-    const artistsArr = (entity.artists || []).map(a => a.name).join(' ');
-    const artist = entity.artists?.[0]?.name || '';
-    let albumArt = entity.visualIdentity?.image?.[0]?.url || '';
-    let albumName = rawTitle;
-    let isrc = '—';
-
-    if (rawTitle) {
-      const ct = cleanTitle(rawTitle);
-      const fa = artist ? artist.split(',')[0].split('&')[0].trim() : '';
-
-      const [itunesRes, mbData] = await Promise.all([
-        fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(ct + ' ' + fa)}&entity=song&limit=1`)
-          .then(r => r.json()).catch(() => null),
-        fetchMusicBrainz(`${ct} ${fa}`)
-      ]);
-
-      if (itunesRes?.results?.[0]) {
-        const m = itunesRes.results[0];
-        if (m.collectionName) albumName = m.collectionName;
-        if (m.artworkUrl100) albumArt = m.artworkUrl100.replace('100x100bb', '600x600bb');
+    const r = await fetch(`https://www.unchainedmusic.io/api/lookup?track=${trackId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Referer': 'https://www.unchainedmusic.io/tools/isrc-checker/'
       }
-
-      const recs = mbData?.recordings || [];
-      const ctL = ct.toLowerCase(), faL = fa.toLowerCase();
-      const match = recs.find(rec => {
-        if (!rec.isrcs?.length) return false;
-        const rt = (rec.title || '').toLowerCase();
-        const ac = (rec['artist-credit'] || []).map(a => (a.name || a.artist?.name || '').toLowerCase()).join(' ');
-        if (rt.includes('8-bit') || rt.includes('karaoke') || rt.includes('tribute') || rt.includes('cover')) return false;
-        return (rt.includes(ctL) || ctL.includes(rt)) && (ac.includes(faL) || rt.includes(faL));
-      });
-
-      if (!match && ct && artistsArr) {
-        await new Promise(r => setTimeout(r, 50));
-        const mbData2 = await fetchMusicBrainz(`${ct} ${artistsArr.replace(/,/g, ' ')}`);
-        const recs2 = mbData2?.recordings || [];
-        const m2 = recs2.find(rec => {
-          if (!rec.isrcs?.length) return false;
-          const rt = (rec.title || '').toLowerCase();
-          const ac = (rec['artist-credit'] || []).map(a => (a.name || a.artist?.name || '').toLowerCase()).join(' ');
-          return (rt.includes(ctL) || ctL.includes(rt)) && (ac.includes(faL) || rt.includes(faL));
-        });
-        if (m2?.isrcs?.length) isrc = m2.isrcs[0];
-      } else if (match?.isrcs?.length) {
-        isrc = match.isrcs[0];
+    });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.found && d.isrc) {
+        return {
+          isrc: d.isrc,
+          albumName: d.album || '',
+          albumArt: d.artwork || ''
+        };
       }
     }
-
-    return { isrc, albumName, albumArt };
-  } catch (e) { return null; }
+  } catch (e) { /* ignore */ }
+  return null;
 }
 
 function cors() {
