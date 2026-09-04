@@ -1,9 +1,18 @@
 {
   "version": 1,
   "include": [
-    "/api/*"
+    "/api/spotify-info",
+    "/api/spotify-batch-isrc",
+    "/api/spotify-track-details"
   ],
   "exclude": [
-    "/*"
+    "/*.html",
+    "/*.js",
+    "/*.css",
+    "/*.png",
+    "/*.jpg",
+    "/*.ico",
+    "/*.json",
+    "/*.zip"
   ]
 }
