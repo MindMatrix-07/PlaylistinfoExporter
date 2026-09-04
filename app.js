@@ -71,13 +71,15 @@ const SCOPES = 'playlist-read-private playlist-read-collaborative user-read-priv
 const REDIRECT_URI = window.location.origin;
 const VERCEL_ORIGIN = 'https://playlistinfoexporter.vercel.app';
 const WEB_FETCH_ORIGIN = 'https://playlistinfoexporter.netlify.app';
+const PAGES_ORIGIN = 'https://playlistinfoexporter.pages.dev';
 
 function isPremiumHost() {
   return window.location.hostname === new URL(VERCEL_ORIGIN).hostname;
 }
 
 function isWebFetchHost() {
-  return !isPremiumHost();
+  const h = window.location.hostname;
+  return h === new URL(WEB_FETCH_ORIGIN).hostname || h === new URL(PAGES_ORIGIN).hostname || !isPremiumHost();
 }
 
 // ─── PKCE Helpers ────────────────────────────
@@ -1598,7 +1600,7 @@ async function exportToHTML() {
             </div>
           </td>
           <td class="artists-cell"><button class="copy-text" type="button" data-copy="${escAttr(track.artists)}">${escHtml(track.artists)}</button></td>
-          <td class="isrc-cell"><button class="copy-text code-copy" type="button" data-copy="${escAttr(track.isrc || '-')}"><code>${escHtml(track.isrc || '-')}</code></button></td>
+          <td class="isrc-cell"><button class="copy-text code-copy isrc-edit" type="button" data-isrc-key="${escAttr(trackKey)}" data-copy="${escAttr(track.isrc || '-')}"><code>${escHtml(track.isrc || '-')}</code></button><span class="added-by-hint" aria-hidden="true"> ✏ tap×2</span></td>
           <td class="added-by-cell"><button class="copy-text added-by-copy" type="button" data-track-key="${escAttr(trackKey)}" data-copy="${escAttr(addedByVal)}">${escHtml(addedByVal || '—')}</button><span class="added-by-hint" aria-hidden="true"> ✏ tap×2</span></td>
           ${includeLanguageColumn ? `<td class="language-cell"><button class="copy-text language-copy" type="button" data-language-key="${escAttr(trackKey)}" data-copy="${escAttr(track.language || '')}">${escHtml(track.language || '')}</button></td>` : ''}
           <td class="link-cell"><a class="open-link" href="${escAttr(track.url)}" target="_blank" rel="noopener">Open</a></td>
@@ -1797,12 +1799,14 @@ async function exportToHTML() {
   <footer class="site-footer">
     <a href="https://playlistinfoexporter.vercel.app/" target="_blank" rel="noopener">playlistinfoexporter.vercel.app</a>
     <a href="https://playlistinfoexporter.netlify.app/" target="_blank" rel="noopener">playlistinfoexporter.netlify.app</a>
+    <a href="https://playlistinfoexporter.pages.dev/" target="_blank" rel="noopener">playlistinfoexporter.pages.dev</a>
   </footer>
   <div class="copy-toast" id="copyToast">Copied</div>
   <script type="application/json" id="embeddedDone">{}</script>
   <script type="application/json" id="embeddedRequested">{}</script>
   <script type="application/json" id="embeddedAddedBy">{}</script>
   <script type="application/json" id="embeddedLanguages">{}</script>
+  <script type="application/json" id="embeddedISRC">{}</script>
   <script type="application/json" id="embeddedTheme">"light"</script>
   <script>
     const storageKey = ${JSON.stringify(storageKey)};
@@ -1811,12 +1815,14 @@ async function exportToHTML() {
     const addedByKey = storageKey + ':addedby';
     const requestedKey = storageKey + ':requested';
     const languageKey = storageKey + ':languages';
+    const isrcKey = storageKey + ':isrc';
 
     const themeToggle = document.getElementById('themeToggle');
     const embeddedDone = document.getElementById('embeddedDone');
     const embeddedRequested = document.getElementById('embeddedRequested');
     const embeddedAddedBy = document.getElementById('embeddedAddedBy');
     const embeddedLanguages = document.getElementById('embeddedLanguages');
+    const embeddedISRC = document.getElementById('embeddedISRC');
     const embeddedTheme = document.getElementById('embeddedTheme');
     const previewAudio = new Audio();
     let activePreviewButton = null;
@@ -1849,6 +1855,9 @@ async function exportToHTML() {
 
     const embeddedAddedByState = readEmbeddedJson(embeddedAddedBy, {});
     const savedAddedBy = Object.assign({}, embeddedAddedByState, JSON.parse(localStorage.getItem(addedByKey) || '{}'));
+
+    const embeddedISRCState = readEmbeddedJson(embeddedISRC, {});
+    const savedISRC = Object.assign({}, embeddedISRCState, JSON.parse(localStorage.getItem(isrcKey) || '{}'));
 
     const boxes = document.querySelectorAll('input[type="checkbox"][data-track-key]');
     const reqBoxes = document.querySelectorAll('input[type="checkbox"][data-requested-key]');
@@ -2000,17 +2009,84 @@ async function exportToHTML() {
         const currentTime = Date.now();
         const tapLength = currentTime - lastTap;
         if (tapLength < 400 && tapLength > 0) {
-          // Double tap — edit
           clearTimeout(tapTimer);
           event.preventDefault();
           triggerEdit();
           lastTap = 0;
         } else {
-          // First tap — wait to see if second tap arrives
           lastTap = currentTime;
           clearTimeout(tapTimer);
           tapTimer = setTimeout(() => {
-            // Single tap — copy
+            copySingleText(button.dataset.copy || '', button);
+          }, 420);
+        }
+      });
+    });
+
+    function setIsrcButtonText(button, value) {
+      button.dataset.copy = value;
+      const code = button.querySelector('code');
+      if (code) code.textContent = value;
+      else button.textContent = value;
+    }
+    document.querySelectorAll('.isrc-edit[data-isrc-key]').forEach(button => {
+      const savedValue = savedISRC[button.dataset.isrcKey];
+      if (typeof savedValue === 'string') setIsrcButtonText(button, savedValue);
+
+      const triggerEdit = () => {
+        const current = button.dataset.copy || '';
+        const input = document.createElement('input');
+        input.className = 'language-edit';
+        input.type = 'text';
+        input.placeholder = 'Enter correct ISRC…';
+        input.value = current === '-' ? '' : current;
+        input.style.fontFamily = 'monospace';
+        input.style.textTransform = 'uppercase';
+        button.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let closed = false;
+        const save = () => {
+          if (closed) return;
+          closed = true;
+          const next = input.value.trim().toUpperCase();
+          setIsrcButtonText(button, next || '-');
+          savedISRC[button.dataset.isrcKey] = next || '-';
+          localStorage.setItem(isrcKey, JSON.stringify(savedISRC));
+          input.replaceWith(button);
+          updateEmbeddedState();
+          showCopyToast('ISRC updated: ' + (next || '-'));
+        };
+        const cancel = () => {
+          if (closed) return;
+          closed = true;
+          input.replaceWith(button);
+        };
+
+        input.addEventListener('keydown', event => {
+          if (event.key === 'Enter') save();
+          if (event.key === 'Escape') cancel();
+        });
+        input.addEventListener('blur', save, { once: true });
+      };
+
+      button.addEventListener('dblclick', triggerEdit);
+
+      let lastTap = 0;
+      let tapTimer = null;
+      button.addEventListener('touchend', event => {
+        const currentTime = Date.now();
+        const tapLength = currentTime - lastTap;
+        if (tapLength < 400 && tapLength > 0) {
+          clearTimeout(tapTimer);
+          event.preventDefault();
+          triggerEdit();
+          lastTap = 0;
+        } else {
+          lastTap = currentTime;
+          clearTimeout(tapTimer);
+          tapTimer = setTimeout(() => {
             copySingleText(button.dataset.copy || '', button);
           }, 420);
         }
@@ -2079,6 +2155,7 @@ async function exportToHTML() {
       embeddedRequested.textContent = JSON.stringify(currentRequestedState());
       embeddedAddedBy.textContent = JSON.stringify(savedAddedBy);
       embeddedLanguages.textContent = JSON.stringify(savedLanguages);
+      embeddedISRC.textContent = JSON.stringify(savedISRC);
       embeddedTheme.textContent = JSON.stringify(document.documentElement.dataset.theme || 'light');
     }
     function downloadCurrentHtml() {
