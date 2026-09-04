@@ -251,7 +251,7 @@ function disconnectSpotify() {
 
 function setFetchMode(mode) {
   if (mode === 'web' && !isWebFetchHost()) {
-    window.location.href = WEB_FETCH_ORIGIN + '/';
+    window.location.href = PAGES_ORIGIN + '/';
     return;
   }
 
@@ -353,7 +353,7 @@ function showSpotifyApiError(err, rawUrl, playlistOwnerId = null, currentUserId 
       ${customExplanation}
       ${details ? `<pre style="margin:10px 0 0;white-space:pre-wrap;font:12px/1.45 Consolas,monospace;color:#fecaca;">${escHtml(details)}</pre>` : ''}
       <div style="margin-top:12px;">
-        <a href="${WEB_FETCH_ORIGIN}/" style="display:inline-flex;color:#fca5a5;font-weight:700;text-decoration:underline;">Switch to Web Fetch (No Login Required)</a>
+        <a href="${PAGES_ORIGIN}/" style="display:inline-flex;color:#fca5a5;font-weight:700;text-decoration:underline;">Switch to Web Fetch (No Login Required)</a>
       </div>
     </div>
   `, 'errorBox2');
